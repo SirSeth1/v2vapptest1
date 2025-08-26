@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">v2v audi</string>
+    <string name="map_view_showing_your_location_and_routes">Map view showing your location and routes</string>
+    <string name="latitude">Latitude: --</string>
+    <string name="braking">Braking: --</string>
+    <string name="distance_alert">Distance Alert: --</string>
+    <string name="longitude">Longitude: --</string>
+    <string name="todo">TODO</string>
+    <string name="todo2">TODO</string>
+    <string name="todo3">TODO</string>
+    <string name="speed_km_h">Speed: -- km/h</string>
+    <string name="todo4">TODO</string>
+</resources>

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "361474142587",
+    "project_id": "v2vaudi",
+    "storage_bucket": "v2vaudi.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:361474142587:android:82ed8a1e4c033452a44dde",
+        "android_client_info": {
+          "package_name": "com.example.v2vaudi"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDyo8z2C9eqHDuRELfjO9ZXwdYy0bP06CM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
