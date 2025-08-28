@@ -10,4 +10,8 @@
     <string name="todo3">TODO</string>
     <string name="speed_km_h">Speed: -- km/h</string>
     <string name="todo4">TODO</string>
+    <string name="danger">DANGER!</string>
+    <string name="danger_vehicle_ahead_braking">⚠️ DANGER! VEHICLE AHEAD BRAKING ⚠️</string>
+    <string name="vehicle_ahead_braking">VEHICLE AHEAD BRAKING</string>
+    <string name="wueh">⚠️</string>
 </resources>
