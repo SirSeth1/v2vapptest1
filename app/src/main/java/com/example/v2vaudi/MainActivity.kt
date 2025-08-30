@@ -2,6 +2,7 @@ package com.example.v2vaudi
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.IntentFilter
 import android.location.Location
@@ -10,8 +11,6 @@ import android.net.wifi.p2p.WifiP2pDevice
 import android.net.wifi.p2p.WifiP2pManager
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -21,6 +20,7 @@ import org.osmdroid.views.MapView
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.overlay.Marker
+import kotlin.math.*
 
 class MainActivity : AppCompatActivity() {
 
@@ -35,12 +35,11 @@ class MainActivity : AppCompatActivity() {
     // GPS
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
+    private var myLastLocation: Location? = null
 
     // Markers
     private var myMarker: Marker? = null
-    private val simulatedVehicleMarkers = mutableListOf<Marker>()
     private val realVehicleMarkers = mutableMapOf<String, Marker>()
-    private val handler = Handler(Looper.getMainLooper())
 
     // Wi-Fi Direct
     private lateinit var manager: WifiP2pManager
@@ -53,14 +52,117 @@ class MainActivity : AppCompatActivity() {
     private var serverThread: ServerThread? = null
     private var clientThread: ClientThread? = null
 
-    // Speed smoothing
-    private val speedBuffer = ArrayDeque<Double>()
-    private var lastLocation: Location? = null
-
     companion object {
         private const val LOCATION_PERMISSION_REQUEST_CODE = 1001
     }
 
+
+    // Distance calculation function
+
+    private fun calculateDistance(
+        lat1: Double, lon1: Double,
+        lat2: Double, lon2: Double
+    ): Double {
+        val R = 6371000.0 // Earth radius in meters
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLon = Math.toRadians(lon2 - lon1)
+        val a = sin(dLat / 2).pow(2.0) +
+                cos(Math.toRadians(lat1)) *
+                cos(Math.toRadians(lat2)) *
+                sin(dLon / 2).pow(2.0)
+        val c = 2 * atan2(sqrt(a), sqrt(1 - a))
+        return R * c
+    }
+
+    // Update Vehicle Marker (peer)
+
+    fun updateVehicleMarker(lat: Double, lon: Double, speed: Double, braking: Boolean) {
+        val id = "$lat$lon"
+        val pos = GeoPoint(lat, lon)
+
+        // Update or add marker
+        realVehicleMarkers[id]?.let { it.position = pos } ?: run {
+            val marker = Marker(mapView).apply {
+                position = pos
+                title = "Peer Vehicle"
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+            }
+            mapView.overlays.add(marker)
+            realVehicleMarkers[id] = marker
+        }
+
+        // ✅ Calculate distance from my car
+        myLastLocation?.let { myLoc ->
+            val distance = calculateDistance(
+                myLoc.latitude, myLoc.longitude,
+                lat, lon
+            )
+
+            when {
+                distance < 25 -> {
+                    distanceAlertText.text = "⚠️ HIGH ALERT: ${"%.1f".format(distance)} m"
+                    distanceAlertText.setTextColor(getColor(android.R.color.holo_red_dark))
+
+                    if (braking) {
+                        // Launch DangerAlertActivity
+                        val intent = Intent(this, DangerAlertActivity::class.java)
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        startActivity(intent)
+                    }
+                }
+                distance < 50 -> {
+                    distanceAlertText.text = "⚠ WARNING: ${"%.1f".format(distance)} m"
+                    distanceAlertText.setTextColor(getColor(android.R.color.holo_orange_dark))
+                }
+                distance < 100 -> {
+                    distanceAlertText.text = "CAUTION: ${"%.1f".format(distance)} m"
+                    distanceAlertText.setTextColor(getColor(android.R.color.holo_blue_dark))
+                }
+                else -> {
+                    distanceAlertText.text = "SAFE: ${"%.1f".format(distance)} m"
+                    distanceAlertText.setTextColor(getColor(android.R.color.holo_green_dark))
+                }
+            }
+        }
+
+        mapView.invalidate()
+    }
+
+    // -----------------------------
+    // Update my own marker
+    // -----------------------------
+    private fun updateLocationUI(location: Location) {
+        val lat = location.latitude
+        val lon = location.longitude
+        val speedKmh = location.speed * 3.6
+        myLastLocation = location // ✅ Save last location
+
+        speedText.text = "Speed: %.2f km/h".format(speedKmh)
+        latitudeText.text = "Latitude: %.6f".format(lat)
+        longitudeText.text = "Longitude: %.6f".format(lon)
+        brakingStatusText.text = "Braking: ${if (speedKmh < 5.0) "YES" else "NO"}"
+
+        val here = GeoPoint(lat, lon)
+        if (myMarker == null) {
+            myMarker = Marker(mapView).apply {
+                position = here
+                title = "Your Vehicle"
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                icon = null
+            }
+            mapView.overlays.add(myMarker)
+            mapView.controller.setZoom(17.0)
+            mapView.controller.setCenter(here)
+        } else {
+            myMarker?.position = here
+            mapView.controller.setCenter(here)
+        }
+        mapView.invalidate()
+    }
+
+    // -----------------------------
+    // Lifecycle & Setup
+    // -----------------------------
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -144,16 +246,13 @@ class MainActivity : AppCompatActivity() {
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 for (loc in result.locations) {
-                    val rawSpeed = computeSpeed(loc)
-                    val filteredSpeed = getFilteredSpeed(rawSpeed)
-
-                    updateLocationUI(loc, filteredSpeed)
+                    updateLocationUI(loc)
 
                     val json = dataHandler.createJson(
                         loc.latitude,
                         loc.longitude,
-                        filteredSpeed,
-                        filteredSpeed < 5.0
+                        loc.speed * 3.6,
+                        loc.speed * 3.6 < 5.0
                     )
                     serverThread?.sendData(json)
                     clientThread?.sendData(json)
@@ -171,82 +270,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // --- Filtering helpers ---
-    private fun getFilteredSpeed(newSpeed: Double): Double {
-        if (speedBuffer.size >= 5) speedBuffer.removeFirst()
-        speedBuffer.addLast(newSpeed)
-        return speedBuffer.average()
-    }
-
-    private fun computeSpeed(location: Location): Double {
-        val prev = lastLocation
-        lastLocation = location
-        if (prev == null) return 0.0
-
-        val distance = prev.distanceTo(location) // meters
-        val time = (location.time - prev.time) / 1000.0 // seconds
-        if (time <= 0) return 0.0
-
-        val speed = (distance / time) * 3.6 // km/h
-        return if (speed < 2.0) 0.0 else speed // discard jitter < 2 km/h
-    }
-
-    private fun updateLocationUI(location: Location, speedKmh: Double) {
-        val lat = location.latitude
-        val lon = location.longitude
-
-        speedText.text = "Speed: %.2f km/h".format(speedKmh)
-        latitudeText.text = "Latitude: %.6f".format(lat)
-        longitudeText.text = "Longitude: %.6f".format(lon)
-        brakingStatusText.text = "Braking: ${if (speedKmh < 5.0) "YES" else "NO"}"
-
-        val here = GeoPoint(lat, lon)
-        if (myMarker == null) {
-            myMarker = Marker(mapView).apply {
-                position = here
-                title = "Your Vehicle"
-                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-            }
-            mapView.overlays.add(myMarker)
-            mapView.controller.setZoom(17.0)
-            mapView.controller.setCenter(here)
-        } else {
-            myMarker?.position = here
-            mapView.controller.setCenter(here)
-        }
-        distanceAlertText.text = "Distance Alert: SAFE"
-        mapView.invalidate()
-    }
-
-    private fun simulateNearbyVehicles() {
-        val redGeoPoints = listOf(
-            GeoPoint(-1.2921, 36.8219),
-            GeoPoint(-1.2925, 36.8225),
-            GeoPoint(-1.2930, 36.8200)
-        )
-        redGeoPoints.forEach { p ->
-            val marker = Marker(mapView).apply {
-                position = p
-                title = "Public Vehicle"
-                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-            }
-            mapView.overlays.add(marker)
-            simulatedVehicleMarkers.add(marker)
-        }
-        handler.postDelayed(object : Runnable {
-            override fun run() {
-                simulatedVehicleMarkers.forEach { m ->
-                    val dLat = (Math.random() - 0.5) / 1000
-                    val dLng = (Math.random() - 0.5) / 1000
-                    val newPos = GeoPoint(m.position.latitude + dLat, m.position.longitude + dLng)
-                    m.position = newPos
-                }
-                mapView.invalidate()
-                handler.postDelayed(this, 3000)
-            }
-        }, 3000)
-    }
-
+    // -----------------------------
+    // Wi-Fi Direct Helpers
+    // -----------------------------
     fun updatePeerList(peers: List<WifiP2pDevice>) {
         if (peers.isEmpty()) return
         val target = peers.first()
@@ -280,21 +306,9 @@ class MainActivity : AppCompatActivity() {
         clientThread = ClientThread(host, dataHandler).also { it.start() }
     }
 
-    fun updateVehicleMarker(lat: Double, lon: Double, speed: Double, braking: Boolean) {
-        val id = "$lat$lon"
-        val pos = GeoPoint(lat, lon)
-        realVehicleMarkers[id]?.let { it.position = pos } ?: run {
-            val marker = Marker(mapView).apply {
-                position = pos
-                title = "Peer Vehicle"
-                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-            }
-            mapView.overlays.add(marker)
-            realVehicleMarkers[id] = marker
-        }
-        mapView.invalidate()
-    }
-
+    // -----------------------------
+    // Lifecycle
+    // -----------------------------
     override fun onResume() {
         super.onResume()
         mapView.onResume()
@@ -313,16 +327,6 @@ class MainActivity : AppCompatActivity() {
         try { fusedLocationClient.removeLocationUpdates(locationCallback) } catch (_: Exception) {}
         serverThread?.shutdown()
         clientThread?.shutdown()
-    }
-
-    override fun onLowMemory() {
-        super.onLowMemory()
-        // osmdroid does not require special handling here
-    }
-
-    override fun onSaveInstanceState(outState: Bundle) {
-        super.onSaveInstanceState(outState)
-        // No explicit map state saving needed for osmdroid
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
