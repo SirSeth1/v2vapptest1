@@ -8,35 +8,63 @@
     android:layout_height="match_parent"
     android:background="#D32F2F">
 
-
+    <!-- Big flashing "!" -->
     <TextView
         android:id="@+id/dangerText1"
-        android:layout_width="152dp"
-        android:layout_height="185dp"
-        android:text="@string/wueh"
-        android:textColor="@android:color/white"
-        android:textSize="90sp"
-        android:textStyle="bold"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintHorizontal_bias="0.617"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintVertical_bias="0.437" />
-
-    <TextView
-        android:id="@+id/dangerText"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="@string/vehicle_ahead_braking"
-        android:textColor="@android:color/white"
+        android:text="@string/y"
+        android:textColor="@color/white"
+        android:textSize="120sp"
+        android:textStyle="bold"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/dangerText"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintVertical_bias="0.4" />
+
+    <!-- Main Danger Message -->
+    <TextView
+        android:id="@+id/dangerText"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="@string/vehicle_ahead_braking1"
+
+        android:textColor="#FFFF00"
         android:textSize="34sp"
         android:textStyle="bold"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintHorizontal_bias="1.0"
+        android:gravity="center"
+        app:layout_constraintTop_toBottomOf="@id/dangerText1"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintVertical_bias="0.528" />
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="16dp" />
+
+    <!-- Actual Distance -->
+    <TextView
+        android:id="@+id/distanceText"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="@string/actual_distance_m"
+        android:textColor="@android:color/white"
+        android:textSize="22sp"
+        android:gravity="center"
+        app:layout_constraintTop_toBottomOf="@id/dangerText"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="24dp" />
+
+    <!-- Safe Distance -->
+    <TextView
+        android:id="@+id/safeText"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="@string/required_safe_distance_m"
+        android:textColor="@android:color/white"
+        android:textSize="22sp"
+        android:gravity="center"
+        app:layout_constraintTop_toBottomOf="@id/distanceText"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="12dp" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>

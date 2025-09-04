@@ -14,4 +14,8 @@
     <string name="danger_vehicle_ahead_braking">⚠️ DANGER! VEHICLE AHEAD BRAKING ⚠️</string>
     <string name="vehicle_ahead_braking">VEHICLE AHEAD BRAKING</string>
     <string name="wueh">⚠️</string>
+    <string name="actual_distance_m">Actual Distance: -- m</string>
+    <string name="vehicle_ahead_braking1">VEHICLE AHEAD BRAKING!</string>
+    <string name="y">!</string>
+    <string name="required_safe_distance_m">Required Safe Distance: -- m</string>
 </resources>
