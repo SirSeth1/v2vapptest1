@@ -16,25 +16,31 @@ class ServerThread(private val dataHandler: DataHandler) : Thread() {
     private var reader: BufferedReader? = null
 
     override fun run() {
-        try {
-            serverSocket = ServerSocket(8888)
-            Log.d("WiFiDirect", "Server: listening on 8888")
-            clientSocket = serverSocket!!.accept()
-            Log.d("WiFiDirect", "Server: client connected")
+        while (running) {
+            try {
+                serverSocket = ServerSocket(8888)
+                Log.d("ServerThread", "Listening on port 8888…")
 
-            out = PrintWriter(clientSocket!!.getOutputStream(), true) // autoFlush
-            reader = BufferedReader(InputStreamReader(clientSocket!!.getInputStream()))
+                clientSocket = serverSocket!!.accept()
+                Log.d("ServerThread", "Client connected: ${clientSocket!!.inetAddress.hostAddress}")
 
-            while (true) {
-                val line = reader?.readLine() ?: break
-                dataHandler.parseJson(line)
+                out = PrintWriter(clientSocket!!.getOutputStream(), true)
+                reader = BufferedReader(InputStreamReader(clientSocket!!.getInputStream()))
+
+                var line: String? = null
+                while (running && reader!!.readLine().also { line = it } != null) {
+                    line?.let {
+                        Log.d("ServerThread", "Received: $it")
+                        dataHandler.parseJson(it)
+                    }
+                }
+
+            } catch (e: Exception) {
+                Log.e("ServerThread", "Error: ${e.message}")
+                sleepRetry()
+            } finally {
+                closeQuietly()
             }
-
-        } catch (e: Exception) {
-            Log.e("WiFiDirect", "Server error: ${e.message}")
-        } finally {
-            closeQuietly()
-            Log.d("WiFiDirect", "Server: closed")
         }
     }
 
@@ -42,14 +48,14 @@ class ServerThread(private val dataHandler: DataHandler) : Thread() {
         try {
             out?.println(data)
         } catch (e: Exception) {
-            Log.e("WiFiDirect", "Server send error: ${e.message}")
+            Log.e("ServerThread", "Send error: ${e.message}")
         }
     }
 
     fun shutdown() {
         running = false
-        interrupt()
         closeQuietly()
+        interrupt()
     }
 
     private fun closeQuietly() {
@@ -57,5 +63,9 @@ class ServerThread(private val dataHandler: DataHandler) : Thread() {
         try { out?.close() } catch (_: Exception) {}
         try { clientSocket?.close() } catch (_: Exception) {}
         try { serverSocket?.close() } catch (_: Exception) {}
+    }
+
+    private fun sleepRetry() {
+        try { sleep(3000) } catch (_: Exception) {}
     }
 }

@@ -2,27 +2,25 @@ package com.example.v2vaudi
 
 import android.Manifest
 import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.content.Intent
 import android.location.Location
 import android.net.wifi.p2p.WifiP2pConfig
 import android.net.wifi.p2p.WifiP2pDevice
 import android.net.wifi.p2p.WifiP2pManager
-import android.os.Build
-import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
+import android.os.*
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import com.google.android.gms.location.*
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.views.overlay.Marker
-import kotlin.math.*
+import kotlin.math.pow
+import kotlin.math.sqrt
+import android.content.IntentFilter
 
 class MainActivity : AppCompatActivity() {
 
@@ -37,30 +35,26 @@ class MainActivity : AppCompatActivity() {
     // GPS
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
-    private var lastLocation: Location? = null
 
     // Markers
     private var myMarker: Marker? = null
     private val realVehicleMarkers = mutableMapOf<String, Marker>()
+    private val peerLastUpdate = mutableMapOf<String, Long>()
     private val handler = Handler(Looper.getMainLooper())
 
     // Wi-Fi Direct
     private lateinit var manager: WifiP2pManager
     private lateinit var channel: WifiP2pManager.Channel
     private lateinit var receiver: WiFiDirectBroadcastReceiver
-    private lateinit var intentFilter: IntentFilter
     private lateinit var dataHandler: DataHandler
 
-    // Sockets
+    // Threads
     private var serverThread: ServerThread? = null
     private var clientThread: ClientThread? = null
 
-    // Speed
-    private var mySpeed: Double = 0.0
-    private val speedBuffer = ArrayDeque<Double>() // smoothing buffer
-
     companion object {
         private const val LOCATION_PERMISSION_REQUEST_CODE = 1001
+        private const val PEER_TIMEOUT = 10_000L // 10 seconds
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -75,7 +69,7 @@ class MainActivity : AppCompatActivity() {
         brakingStatusText = findViewById(R.id.brakingStatusText)
         distanceAlertText = findViewById(R.id.distanceAlertText)
 
-        // OSMDroid setup
+        // Map setup
         mapView.setTileSource(TileSourceFactory.MAPNIK)
         mapView.setMultiTouchControls(true)
 
@@ -87,16 +81,14 @@ class MainActivity : AppCompatActivity() {
         channel = manager.initialize(this, mainLooper, null)
         dataHandler = DataHandler(this)
         receiver = WiFiDirectBroadcastReceiver(manager, channel, this)
-        intentFilter = IntentFilter().apply {
-            addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION)
-            addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION)
-            addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION)
-            addAction(WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION)
-        }
 
         requestAllPermissions()
+
+        // Start periodic peer cleanup
+        startPeerCleanup()
     }
 
+    // ===== PERMISSIONS =====
     private fun requestAllPermissions() {
         val permissions = mutableListOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
@@ -105,39 +97,18 @@ class MainActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
         }
-
         val missing = permissions.filter {
             ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
-
         if (missing.isNotEmpty()) {
             ActivityCompat.requestPermissions(this, missing.toTypedArray(), LOCATION_PERMISSION_REQUEST_CODE)
         } else {
             startLocationUpdates()
-            startPeerDiscovery()
+            discoverPeers()
         }
     }
 
-    private fun startPeerDiscovery() {
-        val fineOk = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        val nearbyOk = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-                ActivityCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) == PackageManager.PERMISSION_GRANTED
-        if (!fineOk || !nearbyOk) return
-
-        try {
-            manager.discoverPeers(channel, object : WifiP2pManager.ActionListener {
-                override fun onSuccess() {
-                    Toast.makeText(this@MainActivity, "Discovering peers…", Toast.LENGTH_SHORT).show()
-                }
-                override fun onFailure(reason: Int) {
-                    Toast.makeText(this@MainActivity, "Peer discovery failed: $reason", Toast.LENGTH_SHORT).show()
-                }
-            })
-        } catch (se: SecurityException) {
-            Toast.makeText(this, "Wi-Fi Direct permission error: ${se.message}", Toast.LENGTH_SHORT).show()
-        }
-    }
-
+    // ===== GPS =====
     private fun startLocationUpdates() {
         val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 2000)
             .setMinUpdateIntervalMillis(1000)
@@ -146,59 +117,27 @@ class MainActivity : AppCompatActivity() {
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
                 for (loc in result.locations) {
-                    val rawSpeed = computeSpeed(loc)
-                    val filteredSpeed = getFilteredSpeed(rawSpeed)
-                    mySpeed = filteredSpeed
+                    updateLocationUI(loc)
 
-                    updateLocationUI(loc, filteredSpeed)
-
+                    val speedKmh = loc.speed * 3.6
                     val json = dataHandler.createJson(
-                        loc.latitude,
-                        loc.longitude,
-                        filteredSpeed,
-                        filteredSpeed < 5.0
+                        loc.latitude, loc.longitude, speedKmh, speedKmh < 5.0
                     )
                     serverThread?.sendData(json)
                     clientThread?.sendData(json)
-
-                    checkSafeDistances()
                 }
             }
         }
 
-        val fineOk = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        if (fineOk) {
-            try {
-                fusedLocationClient.requestLocationUpdates(req, locationCallback, mainLooper)
-            } catch (se: SecurityException) {
-                Toast.makeText(this, "Location permission error: ${se.message}", Toast.LENGTH_SHORT).show()
-            }
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            fusedLocationClient.requestLocationUpdates(req, locationCallback, mainLooper)
         }
     }
 
-    // --- Speed filtering ---
-    private fun getFilteredSpeed(newSpeed: Double): Double {
-        if (speedBuffer.size >= 5) speedBuffer.removeFirst()
-        speedBuffer.addLast(newSpeed)
-        return speedBuffer.average()
-    }
-
-    private fun computeSpeed(location: Location): Double {
-        val prev = lastLocation
-        lastLocation = location
-        if (prev == null) return 0.0
-
-        val distance = prev.distanceTo(location) // meters
-        val time = (location.time - prev.time) / 1000.0 // seconds
-        if (time <= 0) return 0.0
-
-        val speed = (distance / time) * 3.6 // km/h
-        return if (speed < 2.0) 0.0 else speed // discard jitter < 2 km/h
-    }
-
-    private fun updateLocationUI(location: Location, speedKmh: Double) {
+    private fun updateLocationUI(location: Location) {
         val lat = location.latitude
         val lon = location.longitude
+        val speedKmh = location.speed * 3.6
 
         speedText.text = "Speed: %.2f km/h".format(speedKmh)
         latitudeText.text = "Latitude: %.6f".format(lat)
@@ -214,106 +153,73 @@ class MainActivity : AppCompatActivity() {
             }
             mapView.overlays.add(myMarker)
             mapView.controller.setZoom(17.0)
-            mapView.controller.setCenter(here)
-        } else {
-            myMarker?.position = here
-            mapView.controller.setCenter(here)
         }
+        myMarker?.position = here
+        mapView.controller.setCenter(here)
         mapView.invalidate()
+
+        // Calculate warnings
+        checkPeerDistances(lat, lon, speedKmh)
     }
 
-    // --- Safe distance calculation ---
-    private fun calculateSafeDistance(speedKmh: Double): Double {
-        val speedMs = speedKmh / 3.6
-        val reactionTime = 1.5 // seconds
-        val friction = 0.7
-        val g = 9.81
+    // ===== DISTANCE & SPEED ALERTS =====
+    private fun checkPeerDistances(myLat: Double, myLon: Double, mySpeed: Double) {
+        var alert = "SAFE"
+        var dangerTriggered = false
 
-        val reactionDistance = speedMs * reactionTime
-        val brakingDistance = (speedMs * speedMs) / (2 * friction * g)
+        for ((id, marker) in realVehicleMarkers) {
+            val dist = haversine(myLat, myLon, marker.position.latitude, marker.position.longitude)
+            val safeDist = calculateSafeStoppingDistance(mySpeed)
 
-        return reactionDistance + brakingDistance
-    }
-
-    private fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
-        val r = 6371000.0 // Earth radius in meters
-        val dLat = Math.toRadians(lat2 - lat1)
-        val dLon = Math.toRadians(lon2 - lon1)
-        val a = sin(dLat / 2).pow(2.0) + cos(Math.toRadians(lat1)) *
-                cos(Math.toRadians(lat2)) * sin(dLon / 2).pow(2.0)
-        val c = 2 * atan2(sqrt(a), sqrt(1 - a))
-        return r * c
-    }
-
-    private fun checkSafeDistances() {
-        if (myMarker == null) return
-        val myLat = myMarker!!.position.latitude
-        val myLon = myMarker!!.position.longitude
-
-        val safeDistance = calculateSafeDistance(mySpeed)
-
-        var danger = false
-        realVehicleMarkers.values.forEach { peer ->
-            val dist = calculateDistance(myLat, myLon, peer.position.latitude, peer.position.longitude)
-            if (dist < safeDistance) {
-                distanceAlertText.text = "⚠ WARNING: Too close at current speed!"
-                distanceAlertText.setTextColor(getColor(android.R.color.holo_red_dark))
-                danger = true
-
-                if (dist < safeDistance / 2) {
-                    // Launch Danger Screen
-                    val intent = Intent(this, DangerAlertActivity::class.java)
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    startActivity(intent)
+            when {
+                dist < 25 && mySpeed > safeDist -> {
+                    alert = "DANGER: BRAKE!"
+                    dangerTriggered = true
+                }
+                dist < 50 && mySpeed > safeDist -> {
+                    alert = "WARNING: TOO CLOSE"
+                }
+                dist < 100 && mySpeed > safeDist -> {
+                    alert = "CAUTION: Approaching"
                 }
             }
         }
 
-        if (!danger) {
-            distanceAlertText.text = "Distance Alert: SAFE"
-            distanceAlertText.setTextColor(getColor(android.R.color.holo_green_dark))
+        distanceAlertText.text = "Distance Alert: $alert"
+
+        if (dangerTriggered) {
+            startActivity(Intent(this, DangerAlertActivity::class.java))
         }
     }
 
-    // --- Wi-Fi Direct Handling ---
-    fun updatePeerList(peers: List<WifiP2pDevice>) {
-        if (peers.isEmpty()) return
-        val target = peers.first()
-        val fineOk = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        if (!fineOk) return
-
-        val config = WifiP2pConfig().apply { deviceAddress = target.deviceAddress }
-        try {
-            manager.connect(channel, config, object : WifiP2pManager.ActionListener {
-                override fun onSuccess() {
-                    Toast.makeText(this@MainActivity, "Connecting to ${target.deviceName}", Toast.LENGTH_SHORT).show()
-                }
-                override fun onFailure(reason: Int) {
-                    Toast.makeText(this@MainActivity, "Connection failed: $reason", Toast.LENGTH_SHORT).show()
-                }
-            })
-        } catch (se: SecurityException) {
-            Toast.makeText(this, "Wi-Fi Direct connection error: ${se.message}", Toast.LENGTH_SHORT).show()
-        }
+    private fun calculateSafeStoppingDistance(speedKmh: Double): Double {
+        val speedMs = speedKmh / 3.6
+        val reactionTime = 1.5 // seconds
+        val decel = 6.0 // m/s²
+        return speedMs * reactionTime + (speedMs.pow(2) / (2 * decel))
     }
 
-    fun startServer() {
-        serverThread?.shutdown()
-        clientThread?.shutdown()
-        serverThread = ServerThread(dataHandler).also { it.start() }
+    private fun haversine(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val R = 6371000.0 // Earth radius in m
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLon = Math.toRadians(lon2 - lon1)
+        val a = (kotlin.math.sin(dLat / 2).pow(2) +
+                kotlin.math.cos(Math.toRadians(lat1)) *
+                kotlin.math.cos(Math.toRadians(lat2)) *
+                kotlin.math.sin(dLon / 2).pow(2))
+        return 2 * R * kotlin.math.asin(sqrt(a))
     }
 
-    fun startClient(host: String) {
-        serverThread?.shutdown()
-        clientThread?.shutdown()
-        clientThread = ClientThread(host, dataHandler).also { it.start() }
-    }
-
+    // ===== PEER MANAGEMENT =====
     fun updateVehicleMarker(lat: Double, lon: Double, speed: Double, braking: Boolean) {
         val id = "$lat$lon"
         val pos = GeoPoint(lat, lon)
 
-        realVehicleMarkers[id]?.let { it.position = pos } ?: run {
+        peerLastUpdate[id] = System.currentTimeMillis()
+
+        if (realVehicleMarkers.containsKey(id)) {
+            realVehicleMarkers[id]?.position = pos
+        } else {
             val marker = Marker(mapView).apply {
                 position = pos
                 title = "Peer Vehicle"
@@ -322,16 +228,65 @@ class MainActivity : AppCompatActivity() {
             mapView.overlays.add(marker)
             realVehicleMarkers[id] = marker
         }
-
-        checkSafeDistances()
         mapView.invalidate()
     }
 
-    // Lifecycle
+    private fun startPeerCleanup() {
+        handler.postDelayed(object : Runnable {
+            override fun run() {
+                val now = System.currentTimeMillis()
+                val toRemove = peerLastUpdate.filter { now - it.value > PEER_TIMEOUT }.keys
+                for (id in toRemove) {
+                    realVehicleMarkers[id]?.let { mapView.overlays.remove(it) }
+                    realVehicleMarkers.remove(id)
+                    peerLastUpdate.remove(id)
+                }
+                mapView.invalidate()
+                handler.postDelayed(this, 5000)
+            }
+        }, 5000)
+    }
+
+    // ===== WIFI DIRECT =====
+    private fun discoverPeers() {
+        try {
+            manager.discoverPeers(channel, object : WifiP2pManager.ActionListener {
+                override fun onSuccess() {
+                    Toast.makeText(this@MainActivity, "Discovering peers…", Toast.LENGTH_SHORT).show()
+                }
+                override fun onFailure(reason: Int) {
+                    Toast.makeText(this@MainActivity, "Peer discovery failed: $reason", Toast.LENGTH_SHORT).show()
+                }
+            })
+        } catch (_: SecurityException) {}
+    }
+
+    fun updatePeerList(peers: List<WifiP2pDevice>) {
+        if (peers.isEmpty()) return
+        val target = peers.first() // auto-connect to first
+        val config = WifiP2pConfig().apply { deviceAddress = target.deviceAddress }
+        try {
+            manager.connect(channel, config, object : WifiP2pManager.ActionListener {
+                override fun onSuccess() {
+                    Toast.makeText(this@MainActivity, "Auto-connecting to ${target.deviceName}", Toast.LENGTH_SHORT).show()
+                }
+                override fun onFailure(reason: Int) {
+                    Toast.makeText(this@MainActivity, "Connection failed: $reason", Toast.LENGTH_SHORT).show()
+                }
+            })
+        } catch (_: SecurityException) {}
+    }
+
+    // ===== LIFECYCLE =====
     override fun onResume() {
         super.onResume()
         mapView.onResume()
-        registerReceiver(receiver, intentFilter)
+        registerReceiver(receiver, IntentFilter().apply {
+            addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION)
+            addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION)
+            addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION)
+            addAction(WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION)
+        })
     }
 
     override fun onPause() {
@@ -343,7 +298,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         mapView.onDetach()
-        try { fusedLocationClient.removeLocationUpdates(locationCallback) } catch (_: Exception) {}
+        fusedLocationClient.removeLocationUpdates(locationCallback)
         serverThread?.shutdown()
         clientThread?.shutdown()
     }

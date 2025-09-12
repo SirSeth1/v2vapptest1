@@ -1,26 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/main_layout"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    tools:context="com.example.v2vaudi.MainActivity">
+    tools:context=".MainActivity">
 
     <!-- OSMDroid Map -->
     <org.osmdroid.views.MapView
         android:id="@+id/mapView"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:focusable="true"
         app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintBottom_toTopOf="@+id/infoCard"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent"
-        android:clickable="true"
-        android:contentDescription="@string/map_view_showing_your_location_and_routes"
-        />
+        app:layout_constraintEnd_toEndOf="parent" />
 
     <!-- Overlay Info Panel -->
     <androidx.cardview.widget.CardView
@@ -31,7 +26,7 @@
         android:backgroundTint="@android:color/white"
         app:cardElevation="8dp"
         app:cardCornerRadius="16dp"
-        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintBottom_toTopOf="@+id/connectionControls"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
@@ -40,112 +35,88 @@
             android:layout_height="wrap_content"
             android:padding="16dp">
 
-            <!-- Speed -->
-            <ImageView
-                android:id="@+id/speedIcon"
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:contentDescription="@string/todo4"
-                android:src="@android:drawable/ic_menu_compass"
+            <TextView
+                android:id="@+id/speedText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Speed: -- km/h"
+                android:textSize="16sp"
+                android:textColor="#333333"
                 app:layout_constraintTop_toTopOf="parent"
                 app:layout_constraintStart_toStartOf="parent" />
 
             <TextView
-                android:id="@+id/speedText"
-                android:layout_width="0dp"
+                android:id="@+id/latitudeText"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/speed_km_h"
+                android:text="Latitude: --"
                 android:textSize="16sp"
                 android:textColor="#333333"
-                app:layout_constraintStart_toEndOf="@id/speedIcon"
-                app:layout_constraintTop_toTopOf="@id/speedIcon"
-                app:layout_constraintEnd_toEndOf="parent"
-                android:layout_marginStart="8dp" />
-
-            <!-- Latitude -->
-            <ImageView
-                android:id="@+id/latIcon"
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:contentDescription="@string/todo3"
-                android:src="@android:drawable/ic_menu_mylocation"
                 app:layout_constraintTop_toBottomOf="@id/speedText"
                 app:layout_constraintStart_toStartOf="parent"
-                android:layout_marginTop="12dp" />
-
-            <TextView
-                android:id="@+id/latitudeText"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:text="@string/latitude"
-                android:textSize="16sp"
-                android:textColor="#333333"
-                app:layout_constraintTop_toTopOf="@id/latIcon"
-                app:layout_constraintStart_toEndOf="@id/latIcon"
-                app:layout_constraintEnd_toEndOf="parent"
-                android:layout_marginStart="8dp" />
-
-            <!-- Longitude -->
-            <ImageView
-                android:id="@+id/lonIcon"
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:contentDescription="@string/todo"
-                android:src="@android:drawable/ic_menu_mapmode"
-                app:layout_constraintTop_toBottomOf="@id/latitudeText"
-                app:layout_constraintStart_toStartOf="parent"
-                android:layout_marginTop="12dp" />
+                android:layout_marginTop="8dp" />
 
             <TextView
                 android:id="@+id/longitudeText"
-                android:layout_width="0dp"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/longitude"
+                android:text="Longitude: --"
                 android:textSize="16sp"
                 android:textColor="#333333"
-                app:layout_constraintTop_toTopOf="@id/lonIcon"
-                app:layout_constraintStart_toEndOf="@id/lonIcon"
-                app:layout_constraintEnd_toEndOf="parent"
-                android:layout_marginStart="8dp" />
-
-            <!-- Braking Status -->
-            <ImageView
-                android:id="@+id/brakeIcon"
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:contentDescription="@string/todo2"
-                android:src="@android:drawable/ic_menu_close_clear_cancel"
-                app:layout_constraintTop_toBottomOf="@id/longitudeText"
+                app:layout_constraintTop_toBottomOf="@id/latitudeText"
                 app:layout_constraintStart_toStartOf="parent"
-                android:layout_marginTop="12dp" />
+                android:layout_marginTop="8dp" />
 
             <TextView
                 android:id="@+id/brakingStatusText"
-                android:layout_width="0dp"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/braking"
+                android:text="Braking: --"
                 android:textSize="16sp"
                 android:textColor="#333333"
-                app:layout_constraintTop_toTopOf="@id/brakeIcon"
-                app:layout_constraintStart_toEndOf="@id/brakeIcon"
-                app:layout_constraintEnd_toEndOf="parent"
-                android:layout_marginStart="8dp" />
+                app:layout_constraintTop_toBottomOf="@id/longitudeText"
+                app:layout_constraintStart_toStartOf="parent"
+                android:layout_marginTop="8dp" />
 
-            <!-- Distance Alert -->
             <TextView
                 android:id="@+id/distanceAlertText"
-                android:layout_width="0dp"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/distance_alert"
+                android:text="Distance Alert: --"
                 android:textStyle="bold"
                 android:textColor="#D32F2F"
                 android:textSize="17sp"
                 app:layout_constraintTop_toBottomOf="@id/brakingStatusText"
                 app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintEnd_toEndOf="parent"
-                android:layout_marginTop="16dp" />
+                android:layout_marginTop="12dp" />
 
         </androidx.constraintlayout.widget.ConstraintLayout>
     </androidx.cardview.widget.CardView>
+
+    <!-- Connection Buttons -->
+    <LinearLayout
+        android:id="@+id/connectionControls"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:padding="16dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <Button
+            android:id="@+id/btnStartHost"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Start Host" />
+
+        <Button
+            android:id="@+id/btnConnectClient"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
+            android:text="Connect Client" />
+    </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>
