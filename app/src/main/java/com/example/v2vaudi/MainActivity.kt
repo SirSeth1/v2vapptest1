@@ -277,6 +277,16 @@ class MainActivity : AppCompatActivity() {
         } catch (_: SecurityException) {}
     }
 
+    fun startServer() {
+        serverThread = ServerThread(dataHandler)
+        serverThread?.start()
+    }
+
+    fun startClient(host: String) {
+        clientThread = ClientThread(host, dataHandler)
+        clientThread?.start()
+    }
+
     // ===== LIFECYCLE =====
     override fun onResume() {
         super.onResume()
@@ -288,6 +298,8 @@ class MainActivity : AppCompatActivity() {
             addAction(WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION)
         })
     }
+
+
 
     override fun onPause() {
         super.onPause()
@@ -303,3 +315,4 @@ class MainActivity : AppCompatActivity() {
         clientThread?.shutdown()
     }
 }
+

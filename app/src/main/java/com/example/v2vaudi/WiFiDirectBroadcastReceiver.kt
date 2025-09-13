@@ -34,12 +34,12 @@ class WiFiDirectBroadcastReceiver(
             WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION -> {
                 if (hasWifiDirectPermissions(context)) {
                     try {
-                        manager.requestPeers(channel) { list ->
+                        manager.requestPeers(channel, WifiP2pManager.PeerListListener { list ->
                             peers.clear()
                             peers.addAll(list.deviceList)
                             Log.d("WiFiDirect", "Peers found: ${peers.size}")
                             if (peers.isNotEmpty()) activity.updatePeerList(peers)
-                        }
+                        })
                     } catch (se: SecurityException) {
                         Log.e("WiFiDirect", "requestPeers SecurityException: ${se.message}")
                     }
@@ -51,7 +51,7 @@ class WiFiDirectBroadcastReceiver(
                     try {
                         val netInfo = intent.getParcelableExtra<NetworkInfo>(WifiP2pManager.EXTRA_NETWORK_INFO)
                         if (netInfo?.isConnected == true) {
-                            manager.requestConnectionInfo(channel) { info ->
+                            manager.requestConnectionInfo(channel, WifiP2pManager.ConnectionInfoListener { info ->
                                 if (info.groupFormed && info.isGroupOwner) {
                                     Toast.makeText(context, "Group Owner (Server)", Toast.LENGTH_SHORT).show()
                                     activity.startServer()
@@ -60,7 +60,7 @@ class WiFiDirectBroadcastReceiver(
                                     Toast.makeText(context, "Client → $host", Toast.LENGTH_SHORT).show()
                                     activity.startClient(host)
                                 }
-                            }
+                            })
                         }
                     } catch (se: SecurityException) {
                         Log.e("WiFiDirect", "requestConnectionInfo SecurityException: ${se.message}")

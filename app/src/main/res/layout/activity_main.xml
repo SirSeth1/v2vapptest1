@@ -10,12 +10,12 @@
     <!-- OSMDroid Map -->
     <org.osmdroid.views.MapView
         android:id="@+id/mapView"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        app:layout_constraintTop_toTopOf="parent"
+        android:layout_width="412dp"
+        android:layout_height="1116dp"
         app:layout_constraintBottom_toTopOf="@+id/infoCard"
+        app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
+        app:layout_constraintTop_toTopOf="parent" />
 
     <!-- Overlay Info Panel -->
     <androidx.cardview.widget.CardView
@@ -105,18 +105,7 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
-        <Button
-            android:id="@+id/btnStartHost"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Start Host" />
 
-        <Button
-            android:id="@+id/btnConnectClient"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="16dp"
-            android:text="Connect Client" />
     </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>
