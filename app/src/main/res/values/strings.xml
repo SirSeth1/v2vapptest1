@@ -18,4 +18,9 @@
     <string name="vehicle_ahead_braking1">VEHICLE AHEAD BRAKING!</string>
     <string name="y">!</string>
     <string name="required_safe_distance_m">Required Safe Distance: -- m</string>
+    <string name="speed_km_h1">Speed: -- km/h</string>
+    <string name="latitude1">Latitude: --</string>
+    <string name="longitude1">Longitude: --</string>
+    <string name="braking1">Braking: --</string>
+    <string name="distance_alert1">Distance Alert: --</string>
 </resources>

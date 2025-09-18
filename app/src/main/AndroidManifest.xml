@@ -2,17 +2,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Permissions -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
-    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-
-    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
-       <application
+    <application
+        android:name=".MyApp"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -23,21 +21,22 @@
         android:theme="@style/Theme.V2vAudi"
         tools:targetApi="31">
 
+        <!-- osmdroid cache path -->
+        <meta-data
+            android:name="osmdroid.basePath"
+            android:value="osmdroid" />
 
-           <meta-data
-               android:name="osmdroid.basePath"
-               android:value="osmdroid" />
+        <!-- Firebase notification defaults (optional, safe to keep) -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@mipmap/ic_launcher" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/purple_500" />
 
+        <!-- Activities -->
         <activity
             android:name=".LoginActivity"
-            android:exported="true" />
-
-        <activity
-            android:name=".SignupActivity"
-            android:exported="false" />
-
-        <activity
-            android:name=".MainActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -45,6 +44,17 @@
             </intent-filter>
         </activity>
 
-    </application>
+        <activity
+            android:name=".SignupActivity"
+            android:exported="false" />
 
+        <activity
+            android:name=".MainActivity"
+            android:exported="true" />
+
+        <activity
+            android:name=".DangerAlertActivity"
+            android:exported="false" />
+
+    </application>
 </manifest>

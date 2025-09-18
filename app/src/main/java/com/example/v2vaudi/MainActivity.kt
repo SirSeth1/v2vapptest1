@@ -1,26 +1,23 @@
 package com.example.v2vaudi
 
 import android.Manifest
-import android.content.Context
-import android.content.pm.PackageManager
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.location.Location
-import android.net.wifi.p2p.WifiP2pConfig
-import android.net.wifi.p2p.WifiP2pDevice
-import android.net.wifi.p2p.WifiP2pManager
 import android.os.*
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import com.google.android.gms.location.*
+import com.google.firebase.database.*
+import org.osmdroid.config.Configuration
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.views.overlay.Marker
 import kotlin.math.pow
 import kotlin.math.sqrt
-import android.content.IntentFilter
 
 class MainActivity : AppCompatActivity() {
 
@@ -36,21 +33,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
 
-    // Markers
-    private var myMarker: Marker? = null
-    private val realVehicleMarkers = mutableMapOf<String, Marker>()
+    // Firebase
+    private lateinit var db: DatabaseReference
+    private val peerMarkers = mutableMapOf<String, Marker>()
     private val peerLastUpdate = mutableMapOf<String, Long>()
     private val handler = Handler(Looper.getMainLooper())
 
-    // Wi-Fi Direct
-    private lateinit var manager: WifiP2pManager
-    private lateinit var channel: WifiP2pManager.Channel
-    private lateinit var receiver: WiFiDirectBroadcastReceiver
-    private lateinit var dataHandler: DataHandler
-
-    // Threads
-    private var serverThread: ServerThread? = null
-    private var clientThread: ClientThread? = null
+    // My Vehicle
+    private var myMarker: Marker? = null
+    private val myVehicleId = Build.DEVICE + "-" + Build.SERIAL // unique-ish ID
 
     companion object {
         private const val LOCATION_PERMISSION_REQUEST_CODE = 1001
@@ -60,6 +51,8 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        Configuration.getInstance().userAgentValue = packageName
 
         // UI bindings
         mapView = findViewById(R.id.mapView)
@@ -76,27 +69,24 @@ class MainActivity : AppCompatActivity() {
         // GPS
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
 
-        // Wi-Fi Direct
-        manager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
-        channel = manager.initialize(this, mainLooper, null)
-        dataHandler = DataHandler(this)
-        receiver = WiFiDirectBroadcastReceiver(manager, channel, this)
+        // Firebase
+        db = FirebaseDatabase.getInstance().getReference("vehicles")
 
         requestAllPermissions()
 
-        // Start periodic peer cleanup
+        // Listen for other vehicles
+        startPeerListener()
+
+        // Start periodic cleanup
         startPeerCleanup()
     }
 
     // ===== PERMISSIONS =====
     private fun requestAllPermissions() {
-        val permissions = mutableListOf(
+        val permissions = listOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION
         )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
-        }
         val missing = permissions.filter {
             ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
@@ -104,7 +94,6 @@ class MainActivity : AppCompatActivity() {
             ActivityCompat.requestPermissions(this, missing.toTypedArray(), LOCATION_PERMISSION_REQUEST_CODE)
         } else {
             startLocationUpdates()
-            discoverPeers()
         }
     }
 
@@ -119,12 +108,17 @@ class MainActivity : AppCompatActivity() {
                 for (loc in result.locations) {
                     updateLocationUI(loc)
 
+                    // Push my vehicle state to Firebase
                     val speedKmh = loc.speed * 3.6
-                    val json = dataHandler.createJson(
-                        loc.latitude, loc.longitude, speedKmh, speedKmh < 5.0
+                    val braking = speedKmh < 5.0
+                    val vehicleData = mapOf(
+                        "lat" to loc.latitude,
+                        "lon" to loc.longitude,
+                        "speed" to speedKmh,
+                        "braking" to braking,
+                        "timestamp" to System.currentTimeMillis()
                     )
-                    serverThread?.sendData(json)
-                    clientThread?.sendData(json)
+                    db.child(myVehicleId).setValue(vehicleData)
                 }
             }
         }
@@ -167,7 +161,7 @@ class MainActivity : AppCompatActivity() {
         var alert = "SAFE"
         var dangerTriggered = false
 
-        for ((id, marker) in realVehicleMarkers) {
+        for ((id, marker) in peerMarkers) {
             val dist = haversine(myLat, myLon, marker.position.latitude, marker.position.longitude)
             val safeDist = calculateSafeStoppingDistance(mySpeed)
 
@@ -200,7 +194,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun haversine(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
-        val R = 6371000.0 // Earth radius in m
+        val R = 6371000.0
         val dLat = Math.toRadians(lat2 - lat1)
         val dLon = Math.toRadians(lon2 - lon1)
         val a = (kotlin.math.sin(dLat / 2).pow(2) +
@@ -210,25 +204,39 @@ class MainActivity : AppCompatActivity() {
         return 2 * R * kotlin.math.asin(sqrt(a))
     }
 
-    // ===== PEER MANAGEMENT =====
-    fun updateVehicleMarker(lat: Double, lon: Double, speed: Double, braking: Boolean) {
-        val id = "$lat$lon"
-        val pos = GeoPoint(lat, lon)
+    // ===== FIREBASE LISTENER =====
+    private fun startPeerListener() {
+        db.addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                for (child in snapshot.children) {
+                    val id = child.key ?: continue
+                    if (id == myVehicleId) continue // skip myself
 
-        peerLastUpdate[id] = System.currentTimeMillis()
+                    val lat = child.child("lat").getValue(Double::class.java) ?: continue
+                    val lon = child.child("lon").getValue(Double::class.java) ?: continue
+                    val pos = GeoPoint(lat, lon)
 
-        if (realVehicleMarkers.containsKey(id)) {
-            realVehicleMarkers[id]?.position = pos
-        } else {
-            val marker = Marker(mapView).apply {
-                position = pos
-                title = "Peer Vehicle"
-                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                    peerLastUpdate[id] = System.currentTimeMillis()
+
+                    if (peerMarkers.containsKey(id)) {
+                        peerMarkers[id]?.position = pos
+                    } else {
+                        val marker = Marker(mapView).apply {
+                            position = pos
+                            title = "Peer Vehicle"
+                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                        }
+                        mapView.overlays.add(marker)
+                        peerMarkers[id] = marker
+                    }
+                }
+                mapView.invalidate()
             }
-            mapView.overlays.add(marker)
-            realVehicleMarkers[id] = marker
-        }
-        mapView.invalidate()
+
+            override fun onCancelled(error: DatabaseError) {
+                Toast.makeText(this@MainActivity, "Firebase error: ${error.message}", Toast.LENGTH_SHORT).show()
+            }
+        })
     }
 
     private fun startPeerCleanup() {
@@ -237,8 +245,8 @@ class MainActivity : AppCompatActivity() {
                 val now = System.currentTimeMillis()
                 val toRemove = peerLastUpdate.filter { now - it.value > PEER_TIMEOUT }.keys
                 for (id in toRemove) {
-                    realVehicleMarkers[id]?.let { mapView.overlays.remove(it) }
-                    realVehicleMarkers.remove(id)
+                    peerMarkers[id]?.let { mapView.overlays.remove(it) }
+                    peerMarkers.remove(id)
                     peerLastUpdate.remove(id)
                 }
                 mapView.invalidate()
@@ -247,72 +255,22 @@ class MainActivity : AppCompatActivity() {
         }, 5000)
     }
 
-    // ===== WIFI DIRECT =====
-    private fun discoverPeers() {
-        try {
-            manager.discoverPeers(channel, object : WifiP2pManager.ActionListener {
-                override fun onSuccess() {
-                    Toast.makeText(this@MainActivity, "Discovering peers…", Toast.LENGTH_SHORT).show()
-                }
-                override fun onFailure(reason: Int) {
-                    Toast.makeText(this@MainActivity, "Peer discovery failed: $reason", Toast.LENGTH_SHORT).show()
-                }
-            })
-        } catch (_: SecurityException) {}
-    }
-
-    fun updatePeerList(peers: List<WifiP2pDevice>) {
-        if (peers.isEmpty()) return
-        val target = peers.first() // auto-connect to first
-        val config = WifiP2pConfig().apply { deviceAddress = target.deviceAddress }
-        try {
-            manager.connect(channel, config, object : WifiP2pManager.ActionListener {
-                override fun onSuccess() {
-                    Toast.makeText(this@MainActivity, "Auto-connecting to ${target.deviceName}", Toast.LENGTH_SHORT).show()
-                }
-                override fun onFailure(reason: Int) {
-                    Toast.makeText(this@MainActivity, "Connection failed: $reason", Toast.LENGTH_SHORT).show()
-                }
-            })
-        } catch (_: SecurityException) {}
-    }
-
-    fun startServer() {
-        serverThread = ServerThread(dataHandler)
-        serverThread?.start()
-    }
-
-    fun startClient(host: String) {
-        clientThread = ClientThread(host, dataHandler)
-        clientThread?.start()
-    }
-
     // ===== LIFECYCLE =====
     override fun onResume() {
         super.onResume()
         mapView.onResume()
-        registerReceiver(receiver, IntentFilter().apply {
-            addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION)
-            addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION)
-            addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION)
-            addAction(WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION)
-        })
     }
-
-
 
     override fun onPause() {
         super.onPause()
         mapView.onPause()
-        unregisterReceiver(receiver)
     }
 
     override fun onDestroy() {
         super.onDestroy()
         mapView.onDetach()
         fusedLocationClient.removeLocationUpdates(locationCallback)
-        serverThread?.shutdown()
-        clientThread?.shutdown()
+        // Remove my entry when app closes
+        db.child(myVehicleId).removeValue()
     }
 }
-

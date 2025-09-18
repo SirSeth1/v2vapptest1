@@ -41,8 +41,10 @@ android {
 
 dependencies {
     implementation(libs.androidx.cardview)
+    implementation(platform(libs.firebase.bom))
     implementation(libs.playservices.location)
     implementation(libs.osmdroid.android)
+    implementation(libs.firebase.analytics)
     implementation(libs.play.services.maps)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
@@ -50,6 +52,7 @@ dependencies {
     implementation(libs.androidx.activity)
     implementation(libs.androidx.constraintlayout)
     implementation(libs.firebase.auth)
+    implementation(libs.firebase.database)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
