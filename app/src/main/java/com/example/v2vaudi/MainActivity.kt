@@ -1,6 +1,7 @@
 package com.example.v2vaudi
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
@@ -10,7 +11,11 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import com.google.android.gms.location.*
+import com.google.firebase.auth.ktx.auth
 import com.google.firebase.database.*
+import com.google.firebase.database.ServerValue
+import com.google.firebase.database.ktx.database
+import com.google.firebase.ktx.Firebase
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
@@ -21,7 +26,7 @@ import kotlin.math.sqrt
 
 class MainActivity : AppCompatActivity() {
 
-    // UI
+    // ===== UI =====
     private lateinit var mapView: MapView
     private lateinit var speedText: TextView
     private lateinit var latitudeText: TextView
@@ -29,23 +34,23 @@ class MainActivity : AppCompatActivity() {
     private lateinit var brakingStatusText: TextView
     private lateinit var distanceAlertText: TextView
 
-    // GPS
+    // ===== GPS =====
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
 
-    // Firebase
-    private lateinit var db: DatabaseReference
-    private val peerMarkers = mutableMapOf<String, Marker>()
+    // ===== Map markers =====
+    private var myMarker: Marker? = null
+    private val realVehicleMarkers = mutableMapOf<String, Marker>()
     private val peerLastUpdate = mutableMapOf<String, Long>()
     private val handler = Handler(Looper.getMainLooper())
 
-    // My Vehicle
-    private var myMarker: Marker? = null
-    private val myVehicleId = Build.DEVICE + "-" + Build.SERIAL // unique-ish ID
+    // ===== Firebase =====
+    private val auth = Firebase.auth
+    private val uid: String by lazy { auth.currentUser?.uid ?: getOrCreateLocalId() }
 
     companion object {
         private const val LOCATION_PERMISSION_REQUEST_CODE = 1001
-        private const val PEER_TIMEOUT = 10_000L // 10 seconds
+        private const val PEER_TIMEOUT = 10_000L // 10 sec no update → remove marker
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -54,7 +59,7 @@ class MainActivity : AppCompatActivity() {
 
         Configuration.getInstance().userAgentValue = packageName
 
-        // UI bindings
+        // ---- UI ----
         mapView = findViewById(R.id.mapView)
         speedText = findViewById(R.id.speedText)
         latitudeText = findViewById(R.id.latitudeText)
@@ -62,42 +67,44 @@ class MainActivity : AppCompatActivity() {
         brakingStatusText = findViewById(R.id.brakingStatusText)
         distanceAlertText = findViewById(R.id.distanceAlertText)
 
-        // Map setup
         mapView.setTileSource(TileSourceFactory.MAPNIK)
         mapView.setMultiTouchControls(true)
 
-        // GPS
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
-
-        // Firebase
-        db = FirebaseDatabase.getInstance().getReference("vehicles")
 
         requestAllPermissions()
 
-        // Listen for other vehicles
-        startPeerListener()
-
-        // Start periodic cleanup
+        // Periodic cleanup for stale markers
         startPeerCleanup()
+
+        // Start listening for other vehicles
+        listenForVehicles()
     }
 
-    // ===== PERMISSIONS =====
+    // ================= PERMISSIONS =================
     private fun requestAllPermissions() {
-        val permissions = listOf(
+        val permissions = mutableListOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION
         )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
+        }
         val missing = permissions.filter {
             ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
         if (missing.isNotEmpty()) {
-            ActivityCompat.requestPermissions(this, missing.toTypedArray(), LOCATION_PERMISSION_REQUEST_CODE)
+            ActivityCompat.requestPermissions(
+                this,
+                missing.toTypedArray(),
+                LOCATION_PERMISSION_REQUEST_CODE
+            )
         } else {
             startLocationUpdates()
         }
     }
 
-    // ===== GPS =====
+    // ================= GPS =================
     private fun startLocationUpdates() {
         val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 2000)
             .setMinUpdateIntervalMillis(1000)
@@ -108,22 +115,22 @@ class MainActivity : AppCompatActivity() {
                 for (loc in result.locations) {
                     updateLocationUI(loc)
 
-                    // Push my vehicle state to Firebase
                     val speedKmh = loc.speed * 3.6
-                    val braking = speedKmh < 5.0
-                    val vehicleData = mapOf(
-                        "lat" to loc.latitude,
-                        "lon" to loc.longitude,
-                        "speed" to speedKmh,
-                        "braking" to braking,
-                        "timestamp" to System.currentTimeMillis()
+                    maybeWrite(
+                        lat = loc.latitude,
+                        lon = loc.longitude,
+                        speed = speedKmh,
+                        braking = speedKmh < 5.0
                     )
-                    db.child(myVehicleId).setValue(vehicleData)
                 }
             }
         }
 
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+        if (ActivityCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
             fusedLocationClient.requestLocationUpdates(req, locationCallback, mainLooper)
         }
     }
@@ -150,18 +157,26 @@ class MainActivity : AppCompatActivity() {
         }
         myMarker?.position = here
         mapView.controller.setCenter(here)
+
+        // 🧭 Rotate map smoothly based on travel bearing
+        if (location.hasBearing()) {
+            val smoothBearing =
+                (0.8 * mapView.mapOrientation) + (0.2 * location.bearing)
+            mapView.mapOrientation = smoothBearing.toFloat()
+        }
+
         mapView.invalidate()
 
-        // Calculate warnings
+        // Safety checks
         checkPeerDistances(lat, lon, speedKmh)
     }
 
-    // ===== DISTANCE & SPEED ALERTS =====
+    // ================= DISTANCE & SPEED ALERTS =================
     private fun checkPeerDistances(myLat: Double, myLon: Double, mySpeed: Double) {
         var alert = "SAFE"
         var dangerTriggered = false
 
-        for ((id, marker) in peerMarkers) {
+        for ((id, marker) in realVehicleMarkers) {
             val dist = haversine(myLat, myLon, marker.position.latitude, marker.position.longitude)
             val safeDist = calculateSafeStoppingDistance(mySpeed)
 
@@ -188,7 +203,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun calculateSafeStoppingDistance(speedKmh: Double): Double {
         val speedMs = speedKmh / 3.6
-        val reactionTime = 1.5 // seconds
+        val reactionTime = 1.5 // sec
         val decel = 6.0 // m/s²
         return speedMs * reactionTime + (speedMs.pow(2) / (2 * decel))
     }
@@ -204,39 +219,94 @@ class MainActivity : AppCompatActivity() {
         return 2 * R * kotlin.math.asin(sqrt(a))
     }
 
-    // ===== FIREBASE LISTENER =====
-    private fun startPeerListener() {
-        db.addValueEventListener(object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                for (child in snapshot.children) {
-                    val id = child.key ?: continue
-                    if (id == myVehicleId) continue // skip myself
+    // ================= FIREBASE WRITE =================
+    private var lastWriteTime = 0L
+    private var lastLat = Double.NaN
+    private var lastLon = Double.NaN
+    private var lastSpeed = Double.NaN
 
-                    val lat = child.child("lat").getValue(Double::class.java) ?: continue
-                    val lon = child.child("lon").getValue(Double::class.java) ?: continue
-                    val pos = GeoPoint(lat, lon)
+    private fun maybeWrite(lat: Double, lon: Double, speed: Double, braking: Boolean) {
+        val now = System.currentTimeMillis()
+        val moved = if (!lastLat.isNaN()) haversine(lastLat, lastLon, lat, lon) else Double.MAX_VALUE
+        val speedDelta = kotlin.math.abs((lastSpeed.takeIf { !it.isNaN() } ?: speed) - speed)
 
-                    peerLastUpdate[id] = System.currentTimeMillis()
+        if (moved > 5 || speedDelta > 1 || now - lastWriteTime > 2000) {
+            writeVehicleState(lat, lon, speed, braking)
+            lastLat = lat; lastLon = lon; lastSpeed = speed; lastWriteTime = now
+        }
+    }
 
-                    if (peerMarkers.containsKey(id)) {
-                        peerMarkers[id]?.position = pos
-                    } else {
-                        val marker = Marker(mapView).apply {
-                            position = pos
-                            title = "Peer Vehicle"
-                            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                        }
-                        mapView.overlays.add(marker)
-                        peerMarkers[id] = marker
-                    }
-                }
-                mapView.invalidate()
+    private fun writeVehicleState(lat: Double, lon: Double, speed: Double, braking: Boolean) {
+        val ref = Firebase.database.reference.child("vehicles").child(uid)
+        val payload = mapOf<String, Any>(
+            "lat" to lat,
+            "lon" to lon,
+            "speed" to speed,
+            "braking" to braking,
+            "ts" to ServerValue.TIMESTAMP,
+            "deviceName" to android.os.Build.MODEL
+        )
+        ref.setValue(payload)
+        ref.onDisconnect().removeValue()
+    }
+
+    // ================= FIREBASE LISTENER =================
+    private fun listenForVehicles() {
+        val ref = Firebase.database.reference.child("vehicles")
+        ref.addChildEventListener(object : ChildEventListener {
+            override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
+                handleVehicleSnapshot(snapshot)
             }
 
-            override fun onCancelled(error: DatabaseError) {
-                Toast.makeText(this@MainActivity, "Firebase error: ${error.message}", Toast.LENGTH_SHORT).show()
+            override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {
+                handleVehicleSnapshot(snapshot)
             }
+
+            override fun onChildRemoved(snapshot: DataSnapshot) {
+                val id = snapshot.key ?: return
+                removeMarkerFor(id)
+            }
+
+            override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) {}
+            override fun onCancelled(error: DatabaseError) {}
         })
+    }
+
+    private fun handleVehicleSnapshot(snapshot: DataSnapshot) {
+        val id = snapshot.key ?: return
+        if (id == uid) return
+
+        val lat = snapshot.child("lat").getValue(Double::class.java) ?: return
+        val lon = snapshot.child("lon").getValue(Double::class.java) ?: return
+        val speed = snapshot.child("speed").getValue(Double::class.java) ?: 0.0
+        val braking = snapshot.child("braking").getValue(Boolean::class.java) ?: false
+
+        updateVehicleMarker(lat, lon, speed, braking, id)
+    }
+
+    private fun updateVehicleMarker(lat: Double, lon: Double, speed: Double, braking: Boolean, id: String) {
+        val pos = GeoPoint(lat, lon)
+        peerLastUpdate[id] = System.currentTimeMillis()
+
+        if (realVehicleMarkers.containsKey(id)) {
+            realVehicleMarkers[id]?.position = pos
+        } else {
+            val marker = Marker(mapView).apply {
+                position = pos
+                title = "Peer Vehicle"
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+            }
+            mapView.overlays.add(marker)
+            realVehicleMarkers[id] = marker
+        }
+        mapView.invalidate()
+    }
+
+    private fun removeMarkerFor(id: String) {
+        realVehicleMarkers[id]?.let { mapView.overlays.remove(it) }
+        realVehicleMarkers.remove(id)
+        peerLastUpdate.remove(id)
+        mapView.invalidate()
     }
 
     private fun startPeerCleanup() {
@@ -245,8 +315,8 @@ class MainActivity : AppCompatActivity() {
                 val now = System.currentTimeMillis()
                 val toRemove = peerLastUpdate.filter { now - it.value > PEER_TIMEOUT }.keys
                 for (id in toRemove) {
-                    peerMarkers[id]?.let { mapView.overlays.remove(it) }
-                    peerMarkers.remove(id)
+                    realVehicleMarkers[id]?.let { mapView.overlays.remove(it) }
+                    realVehicleMarkers.remove(id)
                     peerLastUpdate.remove(id)
                 }
                 mapView.invalidate()
@@ -255,7 +325,18 @@ class MainActivity : AppCompatActivity() {
         }, 5000)
     }
 
-    // ===== LIFECYCLE =====
+    // ================= LOCAL ID HELPER =================
+    private fun getOrCreateLocalId(): String {
+        val prefs = getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        val id = prefs.getString("local_id", null)
+        return if (id != null) id else {
+            val newId = java.util.UUID.randomUUID().toString()
+            prefs.edit().putString("local_id", newId).apply()
+            newId
+        }
+    }
+
+    // ================= LIFECYCLE =================
     override fun onResume() {
         super.onResume()
         mapView.onResume()
@@ -270,7 +351,6 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         mapView.onDetach()
         fusedLocationClient.removeLocationUpdates(locationCallback)
-        // Remove my entry when app closes
-        db.child(myVehicleId).removeValue()
+        Firebase.database.reference.child("vehicles").child(uid).removeValue()
     }
 }

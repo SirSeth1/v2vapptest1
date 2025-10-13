@@ -2,6 +2,7 @@
 agp = "8.10.1"
 cardview = "1.0.0"
 
+firebaseAnalyticsKtx = "22.5.0"
 firebaseBom = "34.2.0"
 kotlin = "2.0.21"
 coreKtx = "1.17.0"
@@ -21,6 +22,7 @@ firebaseDatabase = "22.0.0"
 
 
 [libraries]
+firebase-analytics-ktx = { module = "com.google.firebase:firebase-analytics-ktx", version.ref = "firebaseAnalyticsKtx" }
 firebase-bom = { module = "com.google.firebase:firebase-bom", version.ref = "firebaseBom" }
 firebase-analytics = { module = "com.google.firebase:firebase-analytics-ktx" }
 osmdroid-android = { module = "org.osmdroid:osmdroid-android", version.ref = "osmdroid" }
