@@ -11,6 +11,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import com.google.android.gms.location.*
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.database.*
 import com.google.firebase.database.ServerValue
@@ -23,6 +24,7 @@ import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import kotlin.math.pow
 import kotlin.math.sqrt
+import java.io.File
 
 class MainActivity : AppCompatActivity() {
 
@@ -46,7 +48,9 @@ class MainActivity : AppCompatActivity() {
 
     // ===== Firebase =====
     private val auth = Firebase.auth
-    private val uid: String by lazy { auth.currentUser?.uid ?: getOrCreateLocalId() }
+    private val database = Firebase.database
+    private val uid: String
+        get() = auth.currentUser?.uid ?: "unauthenticated"
 
     companion object {
         private const val LOCATION_PERMISSION_REQUEST_CODE = 1001
@@ -57,7 +61,20 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+//added this
+        val basePath = File(getExternalFilesDir(null), "osmdroid")
+        if (!basePath.exists()) basePath.mkdirs()
+
+        val tileCache = File(basePath, "tiles")
+        if (!tileCache.exists()) tileCache.mkdirs()
+
+        Configuration.getInstance().osmdroidBasePath = basePath
+        Configuration.getInstance().osmdroidTileCache = tileCache
+//added this end
+
         Configuration.getInstance().userAgentValue = packageName
+        Configuration.getInstance().osmdroidBasePath = File(getExternalFilesDir(null), "osmdroid")
+        Configuration.getInstance().osmdroidTileCache = File(getExternalFilesDir(null), "osmdroid/tiles")
 
         // ---- UI ----
         mapView = findViewById(R.id.mapView)
@@ -70,11 +87,14 @@ class MainActivity : AppCompatActivity() {
         mapView.setTileSource(TileSourceFactory.MAPNIK)
         mapView.setMultiTouchControls(true)
 
-        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        // Initial map state
+        mapView.controller.setZoom(2.0)
+        mapView.controller.setCenter(GeoPoint(0.0, 0.0))
 
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         requestAllPermissions()
 
-        // Periodic cleanup for stale markers
+        // Cleanup for stale markers
         startPeerCleanup()
 
         // Start listening for other vehicles
@@ -90,15 +110,62 @@ class MainActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
         }
+
         val missing = permissions.filter {
             ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
+
         if (missing.isNotEmpty()) {
             ActivityCompat.requestPermissions(
                 this,
                 missing.toTypedArray(),
                 LOCATION_PERMISSION_REQUEST_CODE
             )
+        } else {
+            ensureSignedIn()  // 👈 Auto-login after permissions granted
+        }
+    }
+
+    // ✅ This method handles user permission responses
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+
+        if (requestCode == LOCATION_PERMISSION_REQUEST_CODE) {
+            val allGranted =
+                grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+            if (allGranted) {
+                ensureSignedIn()
+            } else {
+                Toast.makeText(
+                    this,
+                    "Location permissions are required for the map and tracking.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+
+    // ================= ANONYMOUS LOGIN =================
+    private fun ensureSignedIn() {
+        val auth = FirebaseAuth.getInstance()
+        if (auth.currentUser == null) {
+            auth.signInAnonymously()
+                .addOnCompleteListener { task ->
+                    if (task.isSuccessful) {
+                        Toast.makeText(this, "Signed in anonymously", Toast.LENGTH_SHORT).show()
+                        startLocationUpdates()
+                    } else {
+                        Toast.makeText(
+                            this,
+                            "Auth failed: ${task.exception?.message}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
         } else {
             startLocationUpdates()
         }
@@ -114,7 +181,6 @@ class MainActivity : AppCompatActivity() {
             override fun onLocationResult(result: LocationResult) {
                 for (loc in result.locations) {
                     updateLocationUI(loc)
-
                     val speedKmh = loc.speed * 3.6
                     maybeWrite(
                         lat = loc.latitude,
@@ -140,13 +206,15 @@ class MainActivity : AppCompatActivity() {
         val lon = location.longitude
         val speedKmh = location.speed * 3.6
 
-        speedText.text = "Speed: %.2f km/h".format(speedKmh)
-        latitudeText.text = "Latitude: %.6f".format(lat)
-        longitudeText.text = "Longitude: %.6f".format(lon)
-        brakingStatusText.text = "Braking: ${if (speedKmh < 5.0) "YES" else "NO"}"
+        speedText.text = getString(R.string.speed_format, speedKmh)
+        latitudeText.text = getString(R.string.latitude_format, lat)
+        longitudeText.text = getString(R.string.longitude_format, lon)
+        brakingStatusText.text = getString(R.string.braking_status, if (speedKmh < 5.0) "YES" else "NO")
 
         val here = GeoPoint(lat, lon)
         if (myMarker == null) {
+
+
             myMarker = Marker(mapView).apply {
                 position = here
                 title = "Your Vehicle"
@@ -154,20 +222,13 @@ class MainActivity : AppCompatActivity() {
             }
             mapView.overlays.add(myMarker)
             mapView.controller.setZoom(17.0)
+            mapView.controller.animateTo(here)
+
         }
         myMarker?.position = here
         mapView.controller.setCenter(here)
-
-        // 🧭 Rotate map smoothly based on travel bearing
-        if (location.hasBearing()) {
-            val smoothBearing =
-                (0.8 * mapView.mapOrientation) + (0.2 * location.bearing)
-            mapView.mapOrientation = smoothBearing.toFloat()
-        }
-
         mapView.invalidate()
 
-        // Safety checks
         checkPeerDistances(lat, lon, speedKmh)
     }
 
@@ -176,7 +237,7 @@ class MainActivity : AppCompatActivity() {
         var alert = "SAFE"
         var dangerTriggered = false
 
-        for ((id, marker) in realVehicleMarkers) {
+        for ((_, marker) in realVehicleMarkers) {
             val dist = haversine(myLat, myLon, marker.position.latitude, marker.position.longitude)
             val safeDist = calculateSafeStoppingDistance(mySpeed)
 
@@ -194,7 +255,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        distanceAlertText.text = "Distance Alert: $alert"
+        distanceAlertText.text = "${getString(R.string.distance_alert)}: $alert"
 
         if (dangerTriggered) {
             startActivity(Intent(this, DangerAlertActivity::class.java))
@@ -237,14 +298,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun writeVehicleState(lat: Double, lon: Double, speed: Double, braking: Boolean) {
-        val ref = Firebase.database.reference.child("vehicles").child(uid)
+        val ref = database.reference.child("vehicles").child(uid)
         val payload = mapOf<String, Any>(
             "lat" to lat,
             "lon" to lon,
             "speed" to speed,
             "braking" to braking,
             "ts" to ServerValue.TIMESTAMP,
-            "deviceName" to android.os.Build.MODEL
+            "deviceName" to Build.MODEL
         )
         ref.setValue(payload)
         ref.onDisconnect().removeValue()
@@ -252,7 +313,7 @@ class MainActivity : AppCompatActivity() {
 
     // ================= FIREBASE LISTENER =================
     private fun listenForVehicles() {
-        val ref = Firebase.database.reference.child("vehicles")
+        val ref = database.reference.child("vehicles")
         ref.addChildEventListener(object : ChildEventListener {
             override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
                 handleVehicleSnapshot(snapshot)
@@ -325,22 +386,21 @@ class MainActivity : AppCompatActivity() {
         }, 5000)
     }
 
-    // ================= LOCAL ID HELPER =================
-    private fun getOrCreateLocalId(): String {
-        val prefs = getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
-        val id = prefs.getString("local_id", null)
-        return if (id != null) id else {
-            val newId = java.util.UUID.randomUUID().toString()
-            prefs.edit().putString("local_id", newId).apply()
-            newId
-        }
-    }
-
     // ================= LIFECYCLE =================
     override fun onResume() {
         super.onResume()
         mapView.onResume()
+
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+            == PackageManager.PERMISSION_GRANTED) {
+            if (!::locationCallback.isInitialized) {
+                ensureSignedIn()
+            }
+        } else {
+            requestAllPermissions()
+        }
     }
+
 
     override fun onPause() {
         super.onPause()
@@ -350,7 +410,11 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         mapView.onDetach()
-        fusedLocationClient.removeLocationUpdates(locationCallback)
+
+        if (::locationCallback.isInitialized) {
+            fusedLocationClient.removeLocationUpdates(locationCallback)
+        }
+
         Firebase.database.reference.child("vehicles").child(uid).removeValue()
     }
 }
