@@ -1,4 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
+<!--        <color android:name="sage_green">#8A9A5B</color>-->
+<!--        <color android:name="champagne">#F7E7CE</color>-->
+<!--        <color android:name="deep_teal">#008080</color>-->
+<!--        <color android:name="garnet_red">#610C04</color>-->
+<!--        <color android:name="ash_gray">#B2BEB5</color>-->
+<!--        <color android:name="dusty_rose">#C2A3A8</color>-->
+<!--        <color android:name="onyx_black">#353935</color>-->
+<!--        <color android:name="mauve">#7A4988</color>-->
+<!--        <color android:name="antique_gold">#C4B08A</color>-->
+<!--        <color android:name="spruce_blue">#2C3E4C</color>-->
+<!--        <color android:name="burnt_orange">#A35E34</color>-->
+<!--        <color android:name="cloud_white">#F5F5F5</color>-->
+<!--        <color android:name="forest_green">#31473A</color>-->
+<!--        <color android:name="plum_purple">#601A35</color>-->
 
 </selector>

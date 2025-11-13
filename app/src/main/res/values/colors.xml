@@ -4,4 +4,27 @@
     <color name="white">#FFFFFFFF</color>
     <color name="green">#00674F</color>
     <color name="gray">#6C889A</color>
+    <color name="sage_green">#8A9A5B</color>
+    <color name="obsidian">#1E2A38</color>
+    <color name="champagne">#F7E7CE</color>
+    <color name="deep_teal">#008080</color>
+    <color name="garnet_red">#610C04</color>
+    <color name="ash_gray">#B2BEB5</color>
+    <color name="dusty_rose">#C2A3A8</color>
+    <color name="onyx_black">#353935</color>
+    <color name="mauve">#7A4988</color>
+    <color name="antique_gold">#C4B08A</color>
+    <color name="spruce_blue">#2C3E4C</color>
+    <color name="burnt_orange">#A35E34</color>
+    <color name="cloud_white">#F5F5F5</color>
+    <color name="forest_green">#31473A</color>
+    <color name="plum_purple">#601A35</color>
+    <color name="Ivory">#FFFFF0</color>
+    <color name="Alabaster">#EDEAE0</color>
+    <color name="AntiqueWhite">#FAEBD7</color>
+    <color name="Seashell">#FFF5EE</color>
+    <color name="BoneWhite">#F9F6EE</color>
+    <color name="GhostWhite">#F8F8FF</color>
+    <color name="WhiteSmoke">#F5F5F5</color>
+    <color name="FloralWhite">#FFFAF0</color>
 </resources>

@@ -35,7 +35,7 @@ class LoginActivity : AppCompatActivity() {
                         // Check if the login task was successful
                         if (task.isSuccessful) {
                             Toast.makeText(this, "Login Successful", Toast.LENGTH_SHORT).show()
-                            val intent = Intent(this, MainActivity::class.java)
+                            val intent = Intent(this, SplashActivity::class.java)
                             startActivity(intent)
                             finish() // Finish LoginActivity so user can't go back to it
                         } else {

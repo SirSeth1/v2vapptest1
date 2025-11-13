@@ -41,37 +41,6 @@ android {
     }
 }
 
-//dependencies {
-//    // --- Your non-Firebase dependencies ---
-//    implementation(libs.androidx.cardview)
-//    implementation(libs.playservices.location)
-//    implementation(libs.osmdroid.android)
-//    implementation(libs.play.services.maps)
-//    implementation(libs.androidx.core.ktx)
-//    implementation(libs.androidx.appcompat)
-//    implementation(libs.material)
-//    implementation(libs.androidx.activity)
-//    implementation(libs.androidx.constraintlayout)
-//
-//    // --- Firebase Dependencies (Corrected) ---
-//    // 1. Import the Firebase BOM. This manages the versions for all other Firebase libs.
-//    implementation(platform(libs.firebase.bom))
-//
-//    // 2. Add the Firebase libraries you need.
-//    //    Use the KTX versions for Kotlin-friendly extensions.
-//    //    Do NOT specify a version here; the BOM handles it.
-//    implementation("com.google.firebase:firebase-analytics-ktx")
-//    implementation("com.google.firebase:firebase-auth-ktx")
-//    implementation("com.google.firebase:firebase-database-ktx")
-//
-//
-//    // --- Test dependencies ---
-//    testImplementation(libs.junit)
-//    androidTestImplementation(libs.androidx.junit)
-//    androidTestImplementation(libs.androidx.espresso.core)
-//}
-
-//
 
 dependencies {
     // --- Core Android dependencies ---

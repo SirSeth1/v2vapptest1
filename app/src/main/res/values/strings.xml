@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">v2v audi</string>
+    <string name="app_name">Roadio</string>
     <string name="map_view_showing_your_location_and_routes">Map view showing your location and routes</string>
     <string name="latitude">Latitude: --</string>
     <string name="braking">Braking: --</string>
@@ -27,6 +27,18 @@
     <string name="latitude_format">Latitude: %.6f</string>
     <string name="longitude_format">Longitude: %.6f</string>
     <string name="braking_status">Braking: %1$s</string>
+    <string name="not_yet_registered_sign_up">Not yet registered? Sign up</string>
+    <string name="login">LOGIN</string>
+    <string name="already_registered_login">Already registered? Login</string>
+    <string name="sign_up">SIGN UP</string>
+    <string name="password">Password</string>
+    <string name="email">Email</string>
+    <string name="phone_contact">Phone Contact</string>
+    <string name="username">Username</string>
+    <string name="last_name">Last Name</string>
+    <string name="first_name">First Name</string>
+    <string name="create_username">Create Username</string>
+    <string name="todo7">TODO</string>
 
 
 </resources>

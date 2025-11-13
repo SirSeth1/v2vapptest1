@@ -19,12 +19,14 @@ import com.google.firebase.database.ktx.database
 import com.google.firebase.ktx.Firebase
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
-import org.osmdroid.util.GeoPoint
+import org.osmdroid.util.GeoPoint //A geographical point with latitude and longitude coordinates.
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import kotlin.math.pow
 import kotlin.math.sqrt
 import java.io.File
+import android.view.ViewPropertyAnimator
+import androidx.core.view.WindowCompat
 
 class MainActivity : AppCompatActivity() {
 
@@ -36,7 +38,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var brakingStatusText: TextView
     private lateinit var distanceAlertText: TextView
 
-    // ===== GPS =====
+    // ===== GPS ===== main entry point for accessing the device’s location via Google Play Services.
+    //uses the Fused Location Provider API, which smartly combines GPS, Wi-Fi, and cell networks for accurate and battery-efficient tracking.
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
 
@@ -58,8 +61,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         setContentView(R.layout.activity_main)
+
+        super.onCreate(savedInstanceState)
+        //setContentView(R.layout.activity_main)
+
 
 //added this
         val basePath = File(getExternalFilesDir(null), "osmdroid")
@@ -86,6 +93,8 @@ class MainActivity : AppCompatActivity() {
 
         mapView.setTileSource(TileSourceFactory.MAPNIK)
         mapView.setMultiTouchControls(true)
+        mapView.mapOrientation = 0.0f // start with north up
+
 
         // Initial map state
         mapView.controller.setZoom(2.0)
@@ -227,10 +236,53 @@ class MainActivity : AppCompatActivity() {
         }
         myMarker?.position = here
         mapView.controller.setCenter(here)
+        adjustMapTilt(speedKmh) //dynamic camera tilt
+
+
+        // Rotate map based on driving direction
+        // IN updateLocationUI()
+
+        if (location.hasBearing()) {
+            val currentOrientation = mapView.mapOrientation
+            val targetOrientation = -location.bearing // Map rotates to driving direction
+
+            // Smooth map rotation
+            val newOrientation = currentOrientation + (targetOrientation - currentOrientation) * 0.05f
+            mapView.mapOrientation = newOrientation
+
+            // Keep the marker pointing "up" relative to the map
+            // The marker's rotation should be 0 relative to its "up" direction,
+            // but adjusted for the map's new orientation.
+            // Easiest is to set the marker rotation relative to the map's rotation.
+            myMarker?.rotation = location.bearing - newOrientation
+            // OR, if your marker icon already points "up", you might just want:
+            // myMarker?.rotation = 0f
+            // (You'll need to test this, but the original logic is likely not what you want)
+        }
+
         mapView.invalidate()
 
         checkPeerDistances(lat, lon, speedKmh)
     }
+//Added: 3D map tilt feature
+private fun adjustMapTilt(speedKmh: Double) {
+    // Use map controller for projection
+    val controller = mapView.controller
+
+    // Limit tilt between 0° (still) and 60° (fast)
+    val maxTilt = 60f
+    val tiltFactor = (speedKmh / 120).coerceIn(0.0, 1.0)  // 0 → 120 km/h scale
+    val newTilt = if (speedKmh > 10) (maxTilt * tiltFactor).toFloat() else 0f
+
+    // Apply smooth transition to tilt
+    val currentZoom = mapView.zoomLevelDouble
+    val newZoom = (currentZoom + (currentZoom * 0.02)).coerceAtMost(20.0) // small zoom adjust for visual depth
+
+    // Update tilt and zoom gradually
+    mapView.mapOrientation = mapView.mapOrientation // keep current bearing
+    controller.setZoom(newZoom)
+    mapView.setTilt(newTilt) // Requires OSMdroid 6.1.10+
+}
 
     // ================= DISTANCE & SPEED ALERTS =================
     private fun checkPeerDistances(myLat: Double, myLon: Double, mySpeed: Double) {
@@ -297,6 +349,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    //actualy writes to firebase after the maybe write check
     private fun writeVehicleState(lat: Double, lon: Double, speed: Double, braking: Boolean) {
         val ref = database.reference.child("vehicles").child(uid)
         val payload = mapOf<String, Any>(
@@ -308,7 +361,8 @@ class MainActivity : AppCompatActivity() {
             "deviceName" to Build.MODEL
         )
         ref.setValue(payload)
-        ref.onDisconnect().removeValue()
+        ref.onDisconnect().removeValue() //Tells Firebase to automatically remove this vehicle’s data if the device disconnects unexpectedly (e.g., app closed, network lost).
+        //This is critical for keeping the map clean of stale vehicles.
     }
 
     // ================= FIREBASE LISTENER =================
@@ -333,6 +387,7 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
+    //handling vehicle marker updates
     private fun handleVehicleSnapshot(snapshot: DataSnapshot) {
         val id = snapshot.key ?: return
         if (id == uid) return
@@ -347,22 +402,22 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateVehicleMarker(lat: Double, lon: Double, speed: Double, braking: Boolean, id: String) {
         val pos = GeoPoint(lat, lon)
-        peerLastUpdate[id] = System.currentTimeMillis()
+        peerLastUpdate[id] = System.currentTimeMillis() // Update last seen timestamp, This could be used later for timeouts or removing stale vehicles.
 
         if (realVehicleMarkers.containsKey(id)) {
-            realVehicleMarkers[id]?.position = pos
+            realVehicleMarkers[id]?.position = pos // Update existing marker position. keeps it moving smoothly on the map without creating duplicates.
         } else {
             val marker = Marker(mapView).apply {
                 position = pos
                 title = "Peer Vehicle"
-                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM) // Anchor point at bottom center of the icon
             }
             mapView.overlays.add(marker)
-            realVehicleMarkers[id] = marker
+            realVehicleMarkers[id] = marker // Store the new marker for future updates.
         }
         mapView.invalidate()
     }
-
+//remove marker when vehicle leaves
     private fun removeMarkerFor(id: String) {
         realVehicleMarkers[id]?.let { mapView.overlays.remove(it) }
         realVehicleMarkers.remove(id)
@@ -370,24 +425,25 @@ class MainActivity : AppCompatActivity() {
         mapView.invalidate()
     }
 
+    // ================= PEER CLEANUP =================
     private fun startPeerCleanup() {
-        handler.postDelayed(object : Runnable {
+        handler.postDelayed(object : Runnable { // Runnable to periodically check for stale vehicle markers.
             override fun run() {
                 val now = System.currentTimeMillis()
                 val toRemove = peerLastUpdate.filter { now - it.value > PEER_TIMEOUT }.keys
-                for (id in toRemove) {
+                for (id in toRemove) { // Remove stale markers from the map and internal tracking structures.
                     realVehicleMarkers[id]?.let { mapView.overlays.remove(it) }
                     realVehicleMarkers.remove(id)
                     peerLastUpdate.remove(id)
                 }
                 mapView.invalidate()
-                handler.postDelayed(this, 5000)
+                handler.postDelayed(this, 5000) // Schedule the next check after 5 seconds.
             }
-        }, 5000)
+        }, 5000) // Initial delay before the first check.
     }
 
     // ================= LIFECYCLE =================
-    override fun onResume() {
+    override fun onResume() { // Android lifecycle method called when the activity comes to the foreground.
         super.onResume()
         mapView.onResume()
 
@@ -402,19 +458,34 @@ class MainActivity : AppCompatActivity() {
     }
 
 
-    override fun onPause() {
+    override fun onPause() { // Android lifecycle method called when the activity goes to the background. Runs when the activity is partially hidden (e.g., user switches to another app
         super.onPause()
-        mapView.onPause()
+        mapView.onPause() // Pause the map view to conserve resources when the activity is not in the foreground.
     }
 
-    override fun onDestroy() {
+    override fun onDestroy() { // Android lifecycle method called when the activity is about to be destroyed. This is the final cleanup step before the activity is removed from memory.
         super.onDestroy()
-        mapView.onDetach()
+        mapView.onDetach()// Clean up the map view to prevent memory leaks when the activity is destroyed.
 
-        if (::locationCallback.isInitialized) {
-            fusedLocationClient.removeLocationUpdates(locationCallback)
+        if (::locationCallback.isInitialized) { // Check if locationCallback has been initialized to avoid null reference errors.
+            fusedLocationClient.removeLocationUpdates(locationCallback) // Stop receiving location updates to conserve battery and resources.
         }
 
-        Firebase.database.reference.child("vehicles").child(uid).removeValue()
+        Firebase.database.reference.child("vehicles").child(uid).removeValue() // Remove this vehicle's data from Firebase when the activity is destroyed to keep the database clean.
     }
+}
+
+private fun MapView.setTilt(tiltAngle: Float) {
+    // Limit tilt between 0° and 60°
+    val clampedTilt = tiltAngle.coerceIn(0f, 60f)
+
+    // Convert tilt to a scaleY factor (1.0 = flat, 0.5 = deep tilt)
+    val scaleY = 1f - (clampedTilt / 100f)
+
+    // Apply smooth 3D perspective effect
+    this.animate()
+        .scaleY(scaleY)
+        .setDuration(500)
+        .setUpdateListener { invalidate() }
+        .start()
 }
