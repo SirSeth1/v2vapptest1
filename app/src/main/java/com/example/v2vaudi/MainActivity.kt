@@ -27,6 +27,7 @@ import kotlin.math.sqrt
 import java.io.File
 import android.view.ViewPropertyAnimator
 import androidx.core.view.WindowCompat
+import android.widget.ImageButton
 
 class MainActivity : AppCompatActivity() {
 
@@ -90,6 +91,11 @@ class MainActivity : AppCompatActivity() {
         longitudeText = findViewById(R.id.longitudeText)
         brakingStatusText = findViewById(R.id.brakingStatusText)
         distanceAlertText = findViewById(R.id.distanceAlertText)
+
+        // === Profile Button ===
+        findViewById<ImageButton>(R.id.btnProfile).setOnClickListener {
+            startActivity(Intent(this, ProfileActivity::class.java))
+        }
 
         mapView.setTileSource(TileSourceFactory.MAPNIK)
         mapView.setMultiTouchControls(true)
@@ -249,20 +255,16 @@ class MainActivity : AppCompatActivity() {
             // Smooth map rotation
             val newOrientation = currentOrientation + (targetOrientation - currentOrientation) * 0.05f
             mapView.mapOrientation = newOrientation
+            myMarker?.rotation = 0f
 
-            // Keep the marker pointing "up" relative to the map
-            // The marker's rotation should be 0 relative to its "up" direction,
-            // but adjusted for the map's new orientation.
-            // Easiest is to set the marker rotation relative to the map's rotation.
-            myMarker?.rotation = location.bearing - newOrientation
-            // OR, if your marker icon already points "up", you might just want:
-            // myMarker?.rotation = 0f
-            // (You'll need to test this, but the original logic is likely not what you want)
         }
 
         mapView.invalidate()
 
         checkPeerDistances(lat, lon, speedKmh)
+
+
+
     }
 //Added: 3D map tilt feature
 private fun adjustMapTilt(speedKmh: Double) {
@@ -281,7 +283,7 @@ private fun adjustMapTilt(speedKmh: Double) {
     // Update tilt and zoom gradually
     mapView.mapOrientation = mapView.mapOrientation // keep current bearing
     controller.setZoom(newZoom)
-    mapView.setTilt(newTilt) // Requires OSMdroid 6.1.10+
+    mapView.setTilt(newTilt)
 }
 
     // ================= DISTANCE & SPEED ALERTS =================
@@ -312,6 +314,7 @@ private fun adjustMapTilt(speedKmh: Double) {
         if (dangerTriggered) {
             startActivity(Intent(this, DangerAlertActivity::class.java))
         }
+        logAlertToFile(alert)
     }
 
     private fun calculateSafeStoppingDistance(speedKmh: Double): Double {
@@ -425,6 +428,17 @@ private fun adjustMapTilt(speedKmh: Double) {
         mapView.invalidate()
     }
 
+    // ================= LOGGING ALERT INFO =================
+    private fun logAlertToFile(alertMessage: String) {
+        try {
+            val logFile = File(getExternalFilesDir(null), "alert_logs.txt")
+            logFile.appendText("${System.currentTimeMillis()}: $alertMessage\n")
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+
     // ================= PEER CLEANUP =================
     private fun startPeerCleanup() {
         handler.postDelayed(object : Runnable { // Runnable to periodically check for stale vehicle markers.
@@ -441,6 +455,10 @@ private fun adjustMapTilt(speedKmh: Double) {
             }
         }, 5000) // Initial delay before the first check.
     }
+
+
+
+
 
     // ================= LIFECYCLE =================
     override fun onResume() { // Android lifecycle method called when the activity comes to the foreground.
@@ -473,6 +491,7 @@ private fun adjustMapTilt(speedKmh: Double) {
 
         Firebase.database.reference.child("vehicles").child(uid).removeValue() // Remove this vehicle's data from Firebase when the activity is destroyed to keep the database clean.
     }
+
 }
 
 private fun MapView.setTilt(tiltAngle: Float) {
@@ -489,3 +508,4 @@ private fun MapView.setTilt(tiltAngle: Float) {
         .setUpdateListener { invalidate() }
         .start()
 }
+

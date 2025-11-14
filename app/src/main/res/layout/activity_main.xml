@@ -10,16 +10,35 @@
     <!-- OSMDroid Map -->
 
     <!-- Overlay Info Panel -->
+
     <org.osmdroid.views.MapView
         android:id="@+id/mapView"
         android:layout_width="412dp"
         android:layout_height="1000dp"
         app:layout_constraintBottom_toTopOf="@+id/infoCard"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintHorizontal_bias="0.0"
+        app:layout_constraintHorizontal_bias="1.0"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintVertical_bias="0.497" />
+        app:layout_constraintVertical_bias="0.471">
+
+
+    </org.osmdroid.views.MapView>
+
+    <ImageButton
+        android:id="@+id/btnProfile"
+        android:layout_width="50dp"
+        android:layout_height="50dp"
+        android:layout_margin="37dp"
+        android:background="@drawable/circle_bg"
+        android:contentDescription="Profile"
+        android:padding="10dp"
+        android:scaleType="centerInside"
+        android:src="@drawable/driver"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
 
     <androidx.cardview.widget.CardView
         android:id="@+id/infoCard"
