@@ -1,12 +1,9 @@
 package com.example.v2vaudi
 
 import android.content.Intent
-import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.WindowInsets
-import android.view.WindowInsetsController
 import android.view.animation.AnimationUtils
 import android.widget.ImageView
 import android.widget.TextView
@@ -17,7 +14,7 @@ import com.google.firebase.database.*
 
 class SplashActivity : AppCompatActivity() {
 
-    private val splashTime: Long = 2000 // total splash duration
+    private val splashTime: Long = 5000 // total splash duration
     private lateinit var welcomeText: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {

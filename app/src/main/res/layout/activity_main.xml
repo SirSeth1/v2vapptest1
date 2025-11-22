@@ -32,9 +32,9 @@
         android:layout_margin="37dp"
         android:background="@drawable/circle_bg"
         android:contentDescription="Profile"
-        android:padding="10dp"
+        android:padding="6dp"
         android:scaleType="centerInside"
-        android:src="@drawable/driver"
+        android:src="@drawable/yes_thiss"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />

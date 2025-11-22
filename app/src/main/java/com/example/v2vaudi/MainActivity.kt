@@ -1,7 +1,6 @@
 package com.example.v2vaudi
 
 import android.Manifest
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
@@ -25,9 +24,10 @@ import org.osmdroid.views.overlay.Marker
 import kotlin.math.pow
 import kotlin.math.sqrt
 import java.io.File
-import android.view.ViewPropertyAnimator
 import androidx.core.view.WindowCompat
 import android.widget.ImageButton
+import androidx.core.content.ContextCompat
+import com.google.android.material.math.MathUtils.dist
 
 class MainActivity : AppCompatActivity() {
 
@@ -49,6 +49,17 @@ class MainActivity : AppCompatActivity() {
     private val realVehicleMarkers = mutableMapOf<String, Marker>()
     private val peerLastUpdate = mutableMapOf<String, Long>()
     private val handler = Handler(Looper.getMainLooper())
+
+    // ===== Emergency Brake Detection =====
+    private var lastSpeedCheckTime = 0L // Timestamp of the last speed check
+    private var lastSpeedRecorded = 0.0
+    private var isEmergencyBrakeActive = false
+
+    private fun showEmergencyBrakeScreen() {
+        val intent = Intent(this, EmergencyBrakeActivity::class.java)
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        startActivity(intent)
+    }
 
     // ===== Firebase =====
     private val auth = Firebase.auth
@@ -192,11 +203,16 @@ class MainActivity : AppCompatActivity() {
             .setMinUpdateIntervalMillis(1000)
             .build()
 
-        locationCallback = object : LocationCallback() {
+        locationCallback = object : LocationCallback()
+        {
             override fun onLocationResult(result: LocationResult) {
-                for (loc in result.locations) {
+                for (loc in result.locations)
+                {
                     updateLocationUI(loc)
                     val speedKmh = loc.speed * 3.6
+
+                    detectEmergencyBrake(speedKmh)
+
                     maybeWrite(
                         lat = loc.latitude,
                         lon = loc.longitude,
@@ -234,6 +250,7 @@ class MainActivity : AppCompatActivity() {
                 position = here
                 title = "Your Vehicle"
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                icon = ContextCompat.getDrawable(this@MainActivity, R.drawable.greenicon)
             }
             mapView.overlays.add(myMarker)
             mapView.controller.setZoom(17.0)
@@ -292,28 +309,48 @@ private fun adjustMapTilt(speedKmh: Double) {
         var dangerTriggered = false
 
         for ((_, marker) in realVehicleMarkers) {
+
             val dist = haversine(myLat, myLon, marker.position.latitude, marker.position.longitude)
             val safeDist = calculateSafeStoppingDistance(mySpeed)
 
             when {
-                dist < 25 && mySpeed > safeDist -> {
-                    alert = "DANGER: BRAKE!"
-                    dangerTriggered = true
+                dist <= 25 -> {
+                    if (dist < safeDist) {
+                        alert = "DANGER: BRAKE NOW!"
+                        dangerTriggered = true
+                    } else {
+                        alert = "CAUTION: Close proximity"
+                    }
                 }
-                dist < 50 && mySpeed > safeDist -> {
-                    alert = "WARNING: TOO CLOSE"
+
+                dist in 26.0..50.0 -> {
+                    if (dist < safeDist) {
+                        alert = "WARNING: TOO CLOSE"
+                    } else {
+                        alert = "Caution: Nearby vehicle"
+                    }
                 }
-                dist < 100 && mySpeed > safeDist -> {
-                    alert = "CAUTION: Approaching"
+
+                dist in 51.0..100.0 -> {
+                    if (dist < safeDist) {
+                        alert = "CAUTION: Approaching Fast"
+                    } else {
+                        alert = "Vehicle detected ahead"
+                    }
                 }
+            }
+
+            // Triggering Danger screen here, inside the loop
+            if (dangerTriggered) {
+                val i = Intent(this, DangerAlertActivity::class.java)
+                i.putExtra("actual_distance", dist)
+                i.putExtra("safe_distance", safeDist)
+                startActivity(i)
+                break  // 👈 prevents triggering multiple times
             }
         }
 
         distanceAlertText.text = "${getString(R.string.distance_alert)}: $alert"
-
-        if (dangerTriggered) {
-            startActivity(Intent(this, DangerAlertActivity::class.java))
-        }
         logAlertToFile(alert)
     }
 
@@ -334,6 +371,47 @@ private fun adjustMapTilt(speedKmh: Double) {
                 kotlin.math.sin(dLon / 2).pow(2))
         return 2 * R * kotlin.math.asin(sqrt(a))
     }
+//Emergency brake
+    private fun detectEmergencyBrake(currentSpeed: Double) {
+        val now = System.currentTimeMillis()
+
+        // First reading → just store and wait for next cycle
+        if (lastSpeedCheckTime == 0L) {
+            lastSpeedCheckTime = now
+            lastSpeedRecorded = currentSpeed
+            return
+        }
+
+        val speedDrop = lastSpeedRecorded - currentSpeed
+        val timeDelta = now - lastSpeedCheckTime
+
+        // Emergency braking condition:
+        // Speed drops > 25 km/h in < 500ms → very sharp deceleration
+        if (!isEmergencyBrakeActive && timeDelta <= 500 && speedDrop > 25) {
+            isEmergencyBrakeActive = true
+            broadcastEmergencyBrake()
+            showEmergencyBrakeScreen()
+        }
+
+        lastSpeedCheckTime = now
+        lastSpeedRecorded = currentSpeed
+    }
+
+    //firebase broadcaast
+    private fun broadcastEmergencyBrake() {
+        val ref = database.reference.child("vehicles").child(uid)
+
+        // Broadcast to others
+        ref.child("emergencyBrake").setValue(true)
+
+        // Auto-reset after 1 second
+        Handler(Looper.getMainLooper()).postDelayed({
+            ref.child("emergencyBrake").setValue(false)
+            isEmergencyBrakeActive = false
+        }, 1000)
+    }
+
+
 
     // ================= FIREBASE WRITE =================
     private var lastWriteTime = 0L
@@ -405,22 +483,52 @@ private fun adjustMapTilt(speedKmh: Double) {
 
     private fun updateVehicleMarker(lat: Double, lon: Double, speed: Double, braking: Boolean, id: String) {
         val pos = GeoPoint(lat, lon)
-        peerLastUpdate[id] = System.currentTimeMillis() // Update last seen timestamp, This could be used later for timeouts or removing stale vehicles.
 
+        // Get my location (if marker exists)
+        val myPos = myMarker?.position
+        if (myPos != null) {
+            val dist = haversine(
+                myPos.latitude,
+                myPos.longitude,
+                pos.latitude,
+                pos.longitude
+            )
+
+            // 🚫 Ignore & remove markers outside 100m geofence
+            if (dist > 100) {
+                realVehicleMarkers[id]?.let {
+                    mapView.overlays.remove(it)
+                }
+                realVehicleMarkers.remove(id)
+                peerLastUpdate.remove(id)
+                return
+            }
+        }
+
+        // Update last timestamp
+        peerLastUpdate[id] = System.currentTimeMillis()
+
+        // Update existing marker
         if (realVehicleMarkers.containsKey(id)) {
-            realVehicleMarkers[id]?.position = pos // Update existing marker position. keeps it moving smoothly on the map without creating duplicates.
-        } else {
+            realVehicleMarkers[id]?.position = pos
+        }
+        else {
+            // Make a new orange peer marker
             val marker = Marker(mapView).apply {
                 position = pos
                 title = "Peer Vehicle"
-                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM) // Anchor point at bottom center of the icon
+                icon = ContextCompat.getDrawable(this@MainActivity, R.drawable.orangeicon)
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
             }
+
             mapView.overlays.add(marker)
-            realVehicleMarkers[id] = marker // Store the new marker for future updates.
+            realVehicleMarkers[id] = marker
         }
+
         mapView.invalidate()
     }
-//remove marker when vehicle leaves
+
+    //remove marker when vehicle leaves
     private fun removeMarkerFor(id: String) {
         realVehicleMarkers[id]?.let { mapView.overlays.remove(it) }
         realVehicleMarkers.remove(id)

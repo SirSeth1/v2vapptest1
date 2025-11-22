@@ -45,11 +45,11 @@ class ProfileActivity : AppCompatActivity() {
         val userRef = database.getReference("users").child(userId)
 
         userRef.get().addOnSuccessListener { snapshot ->
-            findViewById<TextView>(R.id.txtFirstName).text = snapshot.child("firstName").value.toString()
-            findViewById<TextView>(R.id.txtLastName).text = snapshot.child("lastName").value.toString()
-            findViewById<TextView>(R.id.txtUsername).text = snapshot.child("username").value.toString()
-            findViewById<TextView>(R.id.txtPhone).text = snapshot.child("phone").value.toString()
-            findViewById<TextView>(R.id.txtEmail).text = snapshot.child("email").value.toString()
+            findViewById<TextView>(R.id.txtFirstName).text = "Firstname: " + snapshot.child("firstName").value.toString()
+            findViewById<TextView>(R.id.txtLastName).text = "Lastname: " + snapshot.child("lastName").value.toString()
+            findViewById<TextView>(R.id.txtUsername).text = "Username: " + snapshot.child("username").value.toString()
+            findViewById<TextView>(R.id.txtPhone).text = "Phone: " + snapshot.child("phone").value.toString()
+            findViewById<TextView>(R.id.txtEmail).text = "Email: " + snapshot.child("email").value.toString()
         }
     }
 
