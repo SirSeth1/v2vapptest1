@@ -54,7 +54,7 @@ class ProfileActivity : AppCompatActivity() {
     }
 
     private fun exportLogs() {
-        val file = File(filesDir, "alert_logs.txt")
+        val file = File(filesDir, "alert_logs.txt")// read from filesDir so FileProvider in MainActivity can share it
 
         if (!file.exists()) {
             Toast.makeText(this, "No alerts logged yet.", Toast.LENGTH_SHORT).show()
@@ -63,7 +63,7 @@ class ProfileActivity : AppCompatActivity() {
 
         val uri = FileProvider.getUriForFile(
             this,
-            "$packageName.fileprovider",
+            "${applicationContext.packageName}.fileprovider",
             file
         )
 
@@ -72,7 +72,7 @@ class ProfileActivity : AppCompatActivity() {
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
+        startActivity(Intent.createChooser(intent, "Export Logs"))
 
-        startActivity(Intent.createChooser(intent, "Share Alert Logs"))
     }
 }
